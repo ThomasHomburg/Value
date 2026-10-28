@@ -10,7 +10,7 @@ import logging
 import math
 
 from data.loader import TickerMetrics
-from data.metrics import fcf_yield, fcf_yield_sbc
+from data.metrics import fcf_yield, fcf_yield_sbc, roic
 from data.sanity import check_ticker
 from scoring.criteria import compute_criteria
 from scoring.filters import check_filters
@@ -101,6 +101,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "fcf_yield_sbc": fcf_yield_sbc(m, latest_fy),
         "fcf_yield_3y": criteria["fcf_yield_sbc_avg3"].value,  # nach SBC (Value-Score)
         "roic_5y": criteria["roic_avg5"].value,
+        "roic_5y_years": criteria["roic_avg5"].years_available,  # Fensterlaenge (Tooltip "ROIC Ø")
+        "roic_latest": roic(m, latest_fy),   # ROIC neuestes Geschaeftsjahr (Spalte + Metrik)
+        "roic_latest_fy": latest_fy,
         "nd_ebitda": criteria["net_debt_ebitda"].value,
         "ev_ebit_med": criteria["ev_ebit_vs_median"].value,
         # Margin of Safety (Base) aus dem DCF-Modul (Build-Schritt 6)
@@ -133,6 +136,19 @@ def evaluate_all(companies: list[TickerMetrics], cfg: dict) -> tuple[list[dict],
             rows.append(res["row"])
     rows.sort(key=lambda r: (r["score"] if r["score"] == r["score"] else -1), reverse=True)
     return rows, excluded
+
+
+def rank_rows(rows: list[dict], key: str = "quality") -> dict[str, int | None]:
+    """Rang je Ticker nach Kennzahl (1 = bester Wert); Gleichstand -> gleicher Rang.
+
+    NaN-Werte erhalten None (Anzeige "n/a"). Wird fuer die Spalte
+    "Quality-Rang" im Universum verwendet (Rangliste + CLI).
+    """
+    vals = sorted({r[key] for r in rows if r[key] == r[key]}, reverse=True)
+    return {
+        r["ticker"]: (vals.index(r[key]) + 1 if r[key] == r[key] else None)
+        for r in rows
+    }
 
 
 def raw_metric_table(m: "TickerMetrics", names: tuple[str, ...]) -> list[dict]:

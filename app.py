@@ -30,7 +30,7 @@ from data.metrics import fcf_yield, fcf_yield_sbc, invested_capital, nopat, roic
 from data.providers.base import ProviderError, build_providers, load_with_provider
 from data.tickerlist import load_ticker_file, parse_ticker_csv, parse_ticker_text
 from scoring.criteria import compute_criteria
-from scoring.pipeline import evaluate_all, evaluate_ticker
+from scoring.pipeline import evaluate_all, evaluate_ticker, rank_rows
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger("value_screener.app")
@@ -137,7 +137,10 @@ def page_ranking() -> None:
     view["FCF-Yield"] = view["fcf_yield"].map(_fmt_pct)
     view["FCF-Yield nach SBC"] = view["fcf_yield_sbc"].map(_fmt_pct)
     view["FCF-Yield nach SBC Ø3J"] = view["fcf_yield_3y"].map(_fmt_pct)
-    view["ROIC Ø5J"] = view["roic_5y"].map(_fmt_pct)
+    view["ROIC Ø"] = view["roic_5y"].map(_fmt_pct)
+    view["ROIC letztes GJ"] = view["roic_latest"].map(_fmt_pct)
+    q_rank = rank_rows(rows, "quality")
+    view["Quality-Rang"] = view["ticker"].map(lambda t: "n/a" if q_rank.get(t) is None else str(q_rank[t]))
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
     view["MoS (Base)"] = view["margin_of_safety"].map(_fmt_pct)   # DCF, Build-Schritt 6
@@ -145,9 +148,9 @@ def page_ranking() -> None:
     view = view.rename(columns={"ticker": "Ticker", "name": "Name", "sector": "Sektor",
                                 "source": "Quelle", "score": "Score",
                                 "quality": "Quality", "value": "Value", "flags": "Flags"})
-    show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Value",
+    show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
-                 "ROIC Ø5J", "ND/EBITDA", "EV/EBIT rel.", "MoS (Base)", "Flags"]
+                 "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.", "MoS (Base)", "Flags"]
     view = view[show_cols].sort_values("Score", ascending=False)
     st.caption(f"{len(view)} bewertet, {len(excluded)} ausgeschlossen "
                f"({total_tickers} Ticker gesamt, {len(view)} nach Filter)")
@@ -175,12 +178,14 @@ def page_ranking() -> None:
         "Quelle": st.column_config.TextColumn("Quelle", help="Datenquelle (yfinance / fmp / demo)"),
         "Score": st.column_config.NumberColumn("Score", help="Gesamtscore = 0,75×Quality + 0,25×Value (0–100)", format="%.1f"),
         "Quality": st.column_config.NumberColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat", format="%.1f"),
+        "Quality-Rang": st.column_config.TextColumn("Quality-Rang", help="Rang nach Quality-Score im Universum (1 = bester); Gleichstand = gleicher Rang; n/a = Quality nicht berechenbar"),
         "Value": st.column_config.NumberColumn("Value", help="Value-Score (0–100): Bewertungs-Kriterien", format="%.1f"),
         "Datenabdeckung": st.column_config.TextColumn("Datenabdeckung", help="Anteil bewerteter Kriterien-Gewichte (n/a-Kriterien herausgerechnet, übrige renormalisiert)"),
         "FCF-Yield": st.column_config.TextColumn("FCF-Yield", help="FCF / Marktkapitalisierung (aktuelles Geschäftsjahr)"),
         "FCF-Yield nach SBC": st.column_config.TextColumn("FCF-Yield nach SBC", help="(FCF − Aktienverguetung) / Marktkapitalisierung (aktuelles Jahr)"),
         "FCF-Yield nach SBC Ø3J": st.column_config.TextColumn("FCF-Yield nach SBC Ø3J", help="3-Jahres-Durchschnitt des FCF-Yield nach SBC – geht in den Value-Score ein"),
-        "ROIC Ø5J": st.column_config.TextColumn("ROIC Ø5J", help="Ø (NOPAT / investiertes Kapital) über die letzten 5 Jahre"),
+        "ROIC Ø": st.column_config.TextColumn("ROIC Ø", help="Ø (NOPAT / investiertes Kapital) über verfügbare Jahre (aktuell 4; yfinance liefert das 5-Jahres-Fenster gekürzt); > 100 % = Kapitalbasis klein (Flag kl.Kapital)"),
+        "ROIC letztes GJ": st.column_config.TextColumn("ROIC letztes GJ", help="ROIC des neuesten Geschäftsjahrs: NOPAT / (Eigenkapital + Nettoverschuldung), Kapitalbasis Jahresende; > 100 % = Kapitalbasis klein"),
         "ND/EBITDA": st.column_config.TextColumn("ND/EBITDA", help="Nettoverschuldung / EBITDA (x, neuestes Jahr)"),
         "EV/EBIT rel.": st.column_config.TextColumn("EV/EBIT rel.", help="EV/EBIT im Vergleich zum Sektor-Median (1,0 = Median)"),
         "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario)"),
@@ -216,12 +221,20 @@ def page_scorecard() -> None:
                  f"Einheit: absolute Betraege)")
 
     total = result["total"]
-    c1, c2, c3, c4 = st.columns(4)
+    # ROIC letztes Geschaeftsjahr (gleiche Formel wie unten: NOPAT / (EK + ND))
+    latest_fy0 = max(m.years)
+    roic_last = roic(m, latest_fy0)
+    roic_last_str = "n/a" if (roic_last != roic_last) else f"{roic_last:.1%}"
+    if roic_last == roic_last and roic_last > 1.0:
+        roic_last_str += "  Kapitalbasis klein"
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Gesamtscore", "n/a" if math.isnan(total) else f"{total:.1f} / 100")
     c2.metric("Quality", "n/a" if math.isnan(result["quality"]) else f"{result['quality']:.1f}")
     c3.metric("Value", "n/a" if math.isnan(result["value"]) else f"{result['value']:.1f}")
+    c4.metric(f"ROIC letztes GJ ({latest_fy0})", roic_last_str,
+              help="ROIC = NOPAT / (Eigenkapital + Nettoverschuldung), Kapitalbasis Jahresende")
     cov = result["coverage"]
-    c4.metric("Datenabdeckung", "n/a" if (cov != cov) else f"{cov:.1%}")
+    c5.metric("Datenabdeckung", "n/a" if (cov != cov) else f"{cov:.1%}")
 
     # Block-Scores als Balken: jeder Balken mit deutschem Blocknamen und Wert
     # beschriftet; Bloecke ohne Daten als "n/a" statt als Luecke (Wert 0 mit Label).
@@ -331,12 +344,13 @@ def page_scorecard() -> None:
                    f"die Kapitalbasis (EK + Nettoverschuldung = {_fmt_abs(ic)}) ist klein oder negativ "
                    "(z. B. Net-Cash-Position), daher ist der ROIC wenig aussagekraeftig.")
 
-    # Formeln + Rohwerte fuer ROIC 5J, FCF-Yield, ND/EBITDA (mit Einheit/Jahr)
-    st.subheader("Formeln & Rohwerte: ROIC 5J, FCF-Yield, ND/EBITDA")
+    # Formeln + Rohwerte fuer ROIC Ø, FCF-Yield, ND/EBITDA (mit Einheit/Jahr)
+    st.subheader("Formeln & Rohwerte: ROIC Ø, FCF-Yield, ND/EBITDA")
     crit = res["criteria"]
 
-    # --- ROIC 5J ---
-    st.markdown("**ROIC 5J** = Ø ( NOPAT / investiertes Kapital ) über die letzten 5 Jahre; "
+    # --- ROIC Ø (ueber verfuegbare Jahre) ---
+    st.markdown("**ROIC Ø** = Ø ( NOPAT / investiertes Kapital ) über die verfügbaren Jahre "
+                f"(aktuell {crit['roic_avg5'].years_available}); "
                 "NOPAT = EBIT × (1 − Steuersatz); investiertes Kapital = Eigenkapital + Nettoverschuldung "
                 "(jeweils Jahresende).")
     roic_rows = []
@@ -357,7 +371,7 @@ def page_scorecard() -> None:
         })
     st.dataframe(pd.DataFrame(roic_rows), width="stretch", hide_index=True)
     roic5 = crit["roic_avg5"]
-    st.caption(f"ROIC 5J = Ø der obigen Jahre = "
+    st.caption(f"ROIC Ø = Ø der obigen Jahre = "
                f"{'n/a' if roic5.is_na else f'{roic5.value:.1%}'} "
                f"({roic5.years_available} Jahre mit Daten). "
                f"Gewichtung im Quality-Score: {CFG['criteria']['roic_avg5']['weight']:.1%}.")

@@ -97,3 +97,30 @@ def test_scores_rounded_to_1_decimal(aapl_metrics):
         v = s[key]
         if v == v:
             assert v == round(v, 1), f"{key}={v} nicht auf 1 Nachkommastelle gerundet"
+
+
+def test_row_has_roic_latest_and_window_years(aapl_metrics):
+    """Row enthaelt ROIC letztes GJ (neuestes FY) + Fensterlaenge des ROIC Ø."""
+    from data.metrics import roic
+    cfg = load_config()
+    res = evaluate_ticker(aapl_metrics, cfg)
+    row = res["row"]
+    latest_fy = max(aapl_metrics.years)
+    assert row["roic_latest"] == roic(aapl_metrics, latest_fy)
+    assert row["roic_latest_fy"] == latest_fy
+    assert row["roic_5y_years"] == res["criteria"]["roic_avg5"].years_available
+
+
+def test_rank_rows_ties_and_nan():
+    """Quality-Rang: 1 = bester Wert; Gleichstand -> gleicher Rang; NaN -> None."""
+    from scoring.pipeline import rank_rows
+    rows = [
+        {"ticker": "A", "quality": 100.0},
+        {"ticker": "B", "quality": 100.0},
+        {"ticker": "C", "quality": 94.3},
+        {"ticker": "D", "quality": float("nan")},
+    ]
+    ranks = rank_rows(rows, "quality")
+    assert ranks["A"] == 1 and ranks["B"] == 1   # Gleichstand
+    assert ranks["C"] == 2                        # nächster freier Rang
+    assert ranks["D"] is None                     # n/a
