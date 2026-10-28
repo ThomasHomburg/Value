@@ -351,3 +351,17 @@ def test_pipeline_logs_source_per_ticker(aapl_metrics, cfg, caplog):
     with caplog.at_level(logging.INFO, logger="value_screener.pipeline"):
         evaluate_ticker(aapl_metrics, cfg)
     assert any("AAPL" in r.message and "Quelle=yfinance" in r.message for r in caplog.records)
+
+
+def test_yfinance_provider_customer_deposits_row():
+    """customer_deposits-Row ('Deposit Liabilities') wird ins Schema aufgenommen."""
+    bal_rows = dict(BAL_ROWS, **{"Deposit Liabilities": [5e9, 4e9]})
+    y25 = _load_yf(bal_rows=bal_rows).years[2025]
+    assert y25["customer_deposits"].value == pytest.approx(5e9)
+    assert y25["customer_deposits"].currency == "EUR"
+
+
+def test_yfinance_provider_customer_deposits_nan_when_missing():
+    """Ohne 'Deposit Liabilities'-Row -> customer_deposits = NaN (nie 0)."""
+    y25 = _load_yf().years[2025]
+    assert math.isnan(y25["customer_deposits"].value)

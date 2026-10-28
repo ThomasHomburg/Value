@@ -52,7 +52,7 @@ criteria:
     block: profitability
     weight: 0.25
     direction: higher
-    full: 0.30
+    full: 0.35
     zero: 0.08
   roe_avg5:
     block: profitability
@@ -84,7 +84,7 @@ criteria:
     block: cashflow
     weight: 0.05
     direction: higher
-    full: 0.20
+    full: 0.30
     zero: 0.03
   gross_margin_trend:
     # Steigung der Bruttomarge in Prozentpunkten pro Jahr (Hestoer 5 J.)
@@ -97,19 +97,27 @@ criteria:
     block: moat
     weight: 0.05
     direction: higher
-    full: 0.06
+    full: 0.15
     zero: 0.0
   fcf_yield_sbc_avg3:
     # FCF-Yield nach SBC: (FCF - Aktienverguetung) / Marktkapitalisierung,
     # Durchschnitt der letzten 3 Jahre. Loest den Roh-FCF-Yield im Value-Score ab.
     block: valuation
-    weight: 0.15
+    weight: 0.30
     direction: higher
     full: 0.08
     zero: 0.02
+  mos_base:
+    # Margin of Safety (Base) aus dem DCF (valuation/dcf.py):
+    # 1 - Kurs / innerer Wert je Aktie (Base). Volle Punkte ab 40 %, null bei <= 0 %.
+    block: valuation
+    weight: 0.40
+    direction: higher
+    full: 0.40
+    zero: 0.0
   ev_ebit_vs_median:
     block: valuation
-    weight: 0.10
+    weight: 0.30
     direction: lower
     full: 0.60
     zero: 1.20

@@ -124,3 +124,56 @@ def test_rank_rows_ties_and_nan():
     assert ranks["A"] == 1 and ranks["B"] == 1   # Gleichstand
     assert ranks["C"] == 2                        # nächster freier Rang
     assert ranks["D"] is None                     # n/a
+
+
+def test_row_has_mos_scenarios_and_kandidat(aapl_metrics):
+    """Row enthaelt MoS Bear/Bull + Kandidaten-Spalte mit Begruendung."""
+    cfg = load_config()
+    res = evaluate_ticker(aapl_metrics, cfg)
+    row = res["row"]
+    assert "mos_bear" in row and "mos_bull" in row and "kandidat" in row
+    assert row["kandidat"].startswith(("ja", "nein"))
+    # AAPL ist kein Kaufkandidat -> Begruendung nennt fehlende Bedingungen
+    if not row["is_buy"]:
+        assert "nein:" in row["kandidat"]
+
+
+def test_mos_base_criterion_uses_dcf(aapl_metrics, cfg):
+    """mos_base-Kriterium liefert die MoS (Base) aus dem DCF."""
+    from scoring.criteria import compute_criteria
+    from valuation.dcf import compute_dcf
+    crits = compute_criteria(aapl_metrics, cfg)
+    dcf = compute_dcf(aapl_metrics, cfg)
+    mos = crits["mos_base"]
+    assert not mos.is_na
+    assert mos.value == dcf.margin_of_safety
+
+
+def test_mos_base_interpolation_points(aapl_metrics, cfg):
+    """MoS >= 40 % -> 100 Punkte; MoS <= 0 % -> 0 Punkte (config: mos_base)."""
+    from scoring.criteria import compute_criteria
+    from scoring.score import interpolate, score_ticker
+    cc = cfg["criteria"]["mos_base"]
+    assert cc["full"] == 0.40 and cc["zero"] == 0.0
+    assert interpolate(0.45, cc["direction"], cc["full"], cc["zero"]) == 100.0
+    assert interpolate(0.0, cc["direction"], cc["full"], cc["zero"]) == 0.0
+    assert interpolate(0.20, cc["direction"], cc["full"], cc["zero"]) == 50.0
+    # AAPL: MoS Base negativ -> mos_base 0 Punkte, Value sinkt
+    crits = compute_criteria(aapl_metrics, cfg)
+    res = score_ticker(crits, cfg["criteria"], cfg.get("score_groups"))
+    assert res["details"]["mos_base"]["points"] == 0.0
+
+
+def test_value_weights_sum_to_one(cfg):
+    """Value-Block: FCF-Yield 30 % + MoS Base 40 % + EV/EBIT 30 % = 100 %."""
+    w = {n: c["weight"] for n, c in cfg["criteria"].items() if c["block"] == "valuation"}
+    assert w == {"fcf_yield_sbc_avg3": 0.30, "mos_base": 0.40, "ev_ebit_vs_median": 0.30}
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+
+
+def test_quality_thresholds_sharpened(cfg):
+    """Verschaerfte Quality-Schwellen: ROIC 35 %, CAGR 15 %, FCF-Marge 30 %."""
+    c = cfg["criteria"]
+    assert c["roic_avg5"]["full"] == 0.35
+    assert c["revenue_cagr_5y"]["full"] == 0.15
+    assert c["fcf_margin_avg5"]["full"] == 0.30

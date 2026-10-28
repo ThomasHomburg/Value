@@ -35,6 +35,8 @@ _ROW_MAP = {
     "_total_debt": ["Total Debt"],
     "net_debt": ["Net Debt"],
     "_cash": ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
+    "_restricted_cash": ["Restricted Cash"],
+    "customer_deposits": ["Deposit Liabilities", "Customer Deposits"],
     "operating_cashflow": ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"],
     "capex": ["Capital Expenditure", "Purchase Of PPE"],
     "stock_based_compensation": ["Stock Based Compensation", "Stock Based Compensation"],
@@ -137,7 +139,8 @@ class YfinanceProvider:
                                                "currency" if key != "shares_diluted" else "shares",
                                                currency, fy)
             if bal_col is not None:
-                for key in ("equity", "_total_debt", "net_debt", "_cash"):
+                for key in ("equity", "_total_debt", "net_debt", "_cash", "_restricted_cash",
+                            "customer_deposits"):
                     year_metrics[key] = Metric(key, _pick(balance, _ROW_MAP[key], bal_col),
                                                "currency", currency, fy)
             if cf_col is not None:

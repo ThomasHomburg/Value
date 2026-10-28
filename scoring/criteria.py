@@ -205,6 +205,35 @@ def calc_fcf_yield_sbc_avg3(m: TickerMetrics, cfg, fx) -> CriterionResult:
     return _result(_avg(yields), False, years, thin)
 
 
+def calc_mos_base(m: TickerMetrics, cfg, fx) -> CriterionResult:
+    """Margin of Safety (Base) aus dem DCF (valuation/dcf.py).
+
+    MoS (Base) = 1 - Kurs / innerer Wert je Aktie (Base-Szenario).
+    Ohne DCF (kein FCF nach SBC, keine Marktkapitalisierung, kein Kurs) -> NaN.
+    """
+    from valuation.dcf import compute_dcf
+    thin = cfg["thin_years"]
+    dcf = compute_dcf(m, {"dcf": _dcf_cfg_for_criteria()}, fx=fx)
+    mos = dcf.margin_of_safety
+    years = len(m.years)
+    if mos != mos:
+        return _result(float("nan"), True, years, thin)
+    return _result(mos, False, years, thin)
+
+
+def _dcf_cfg_for_criteria() -> dict:
+    """Minimal-Config fuer compute_dcf aus der globalen Config laden."""
+    try:
+        from config import load_config
+        return load_config()["dcf"]
+    except Exception:
+        return {
+            "discount_rate": 0.09, "terminal_growth": 0.025,
+            "base_growth_cap": 0.06, "bull_growth_multiplier": 1.3,
+            "bull_growth_cap": 0.10, "fade_to_growth": 0.025,
+        }
+
+
 def calc_ev_ebit_vs_median(m: TickerMetrics, cfg, fx) -> CriterionResult:
     """Aktuelles EV/EBIT im Verhaeltnis zum eigenen Median (Fenster 5 J.).
 
@@ -251,6 +280,7 @@ CRITERIA: dict[str, Calc] = {
     "gross_margin_trend": calc_gross_margin_trend,
     "revenue_cagr_5y": calc_revenue_cagr_5y,
     "fcf_yield_sbc_avg3": calc_fcf_yield_sbc_avg3,
+    "mos_base": calc_mos_base,
     "ev_ebit_vs_median": calc_ev_ebit_vs_median,
 }
 

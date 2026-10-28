@@ -53,14 +53,18 @@ def main() -> None:
 
     rows, excluded = evaluate_all(companies, cfg)
     q_rank = rank_rows(rows, "quality")
+    # Standard-Sortierung: Kaufkandidat zuerst, dann MoS (Base) absteigend
+    rows.sort(key=lambda r: (1 if r.get("is_buy") else 0,
+                             r["margin_of_safety"] if r["margin_of_safety"] == r["margin_of_safety"] else -1),
+              reverse=True)
 
-    print(f"\n=== Rangliste (Quality/Value getrennt, renormalisiert) – "
+    print(f"\n=== Rangliste (Quality/Value getrennt, renormalisiert; sortiert: Kandidat, MoS Base) – "
           f"{len(rows)} bewertet, {len(excluded)} ausgeschlossen "
           f"({len(rows) + len(excluded)} Ticker gesamt) ===")
     header = (f"{'Ticker':<10} {'Name':<30} {'Sektor':<16} {'Land':<4} {'Quelle':<8} "
               f"{'Score':>6} {'Quality':>7} {'Q-Rang':>6} {'Value':>6} {'Datenabdeckung':>14} "
               f"{'FCF-Yield':>9} {'FCF-Yld n.SBC':>12} {'FCF-Yld n.SBC 3J':>16} "
-              f"{'ROIC Ø':>8} {'ROIC letzte':>11} {'ND/EBITDA':>9} {'MoS Base':>8}  Flags")
+              f"{'ROIC Ø':>8} {'ROIC letzte':>11} {'ND/EBITDA':>9} {'MoS Base':>8} {'MoS Bear':>8} {'MoS Bull':>8}  Kandidat / Flags")
     print(header)
     print("-" * len(header))
     for r in rows:
@@ -78,7 +82,9 @@ def main() -> None:
             f"{_fmt(r['roic_5y'], '>8.1%')} "
             f"{_fmt(r['roic_latest'], '>11.1%')} "
             f"{_fmt(r['nd_ebitda'], '>9.2f')} "
-            f"{_fmt(r['margin_of_safety'], '>8.1%')}  {r['flags']}"
+            f"{_fmt(r['margin_of_safety'], '>8.1%')} "
+            f"{_fmt(r['mos_bear'], '>8.1%')} "
+            f"{_fmt(r['mos_bull'], '>8.1%')}  {r['kandidat']} | {r['flags']}"
         )
     buys = [r["ticker"] for r in rows if r.get("is_buy")]
     if buys:

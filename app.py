@@ -94,7 +94,7 @@ def page_ranking() -> None:
     # Banner: eine Zeile (Quelle + Ticker-Anzahl), nicht doppelt
     total_tickers = len(rows) + len(excluded)
     if kind == "live":
-        st.success(f"LIVE · {source} · {total_tickers} Ticker")
+        st.success(f"LIVE · yfinance · {total_tickers} Ticker")
     elif kind == "import":
         st.info(f"{source} · {total_tickers} Ticker")
     else:
@@ -144,14 +144,21 @@ def page_ranking() -> None:
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
     view["MoS (Base)"] = view["margin_of_safety"].map(_fmt_pct)   # DCF, Build-Schritt 6
+    view["MoS Bear"] = view["mos_bear"].map(_fmt_pct)
+    view["MoS Bull"] = view["mos_bull"].map(_fmt_pct)
+    view["Kandidat"] = view["kandidat"].map(lambda v: str(v))
     view["Datenabdeckung"] = view["coverage"].map(lambda v: "n/a" if (v != v) else f"{v:.1%}")
     view = view.rename(columns={"ticker": "Ticker", "name": "Name", "sector": "Sektor",
                                 "source": "Quelle", "score": "Score",
                                 "quality": "Quality", "value": "Value", "flags": "Flags"})
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
-                 "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.", "MoS (Base)", "Flags"]
-    view = view[show_cols].sort_values("Score", ascending=False)
+                 "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.", "MoS (Base)", "MoS Bear", "MoS Bull", "Kandidat", "Flags"]
+    # Standard-Sortierung: Kaufkandidat zuerst, dann MoS (Base) absteigend
+    view["_kauf"] = (view["Kandidat"] == "ja").astype(int)
+    view["_mos"] = pd.to_numeric(view["MoS (Base)"].str.replace("n/a", "").str.rstrip("%"), errors="coerce")
+    view = view.sort_values(["_kauf", "_mos"], ascending=[False, False])
+    view = view[show_cols]
     st.caption(f"{len(view)} bewertet, {len(excluded)} ausgeschlossen "
                f"({total_tickers} Ticker gesamt, {len(view)} nach Filter)")
     # Durch Sektor-/Land-Filter ausgeblendete Ticker anzeigen
@@ -189,6 +196,9 @@ def page_ranking() -> None:
         "ND/EBITDA": st.column_config.TextColumn("ND/EBITDA", help="Nettoverschuldung / EBITDA (x, neuestes Jahr)"),
         "EV/EBIT rel.": st.column_config.TextColumn("EV/EBIT rel.", help="EV/EBIT im Vergleich zum Sektor-Median (1,0 = Median)"),
         "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario)"),
+        "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
+        "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
+        "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Score ≥ 70, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
         "Flags": st.column_config.TextColumn("Flags", help="blk:duenn = Block mit >30 % fehlenden Daten · duenn = Kriterium mit < 5 Jahren Daten · kl.Kapital = ROIC > 100 % (kleine/negative Kapitalbasis) · kauf = Kaufkandidat (Score ≥ 70, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs)"),
     }
     st.dataframe(styler, width="stretch", hide_index=True, column_config=col_cfg)
@@ -261,14 +271,15 @@ def page_scorecard() -> None:
         .mark_bar()
         .encode(
             x=alt.X("Score:Q", title="Score (0–100)", scale=alt.Scale(domain=[0, 100])),
-            y=alt.Y("Block:N", sort=list(block_df["Block"]), title=None),
+            y=alt.Y("Block:N", sort=list(block_df["Block"]), title="Block",
+                    axis=alt.Axis(labelLimit=200, labelOverlap=False)),
             color=alt.Color("Score:Q", scale=alt.Scale(scheme="blues"), legend=None),
             tooltip=[
                 alt.Tooltip("Block:N", title="Block"),
                 alt.Tooltip("Score:Q", title="Score", format=".1f"),
             ],
         )
-        .properties(height=max(120, 32 * len(block_df)))
+        .properties(height=max(160, 36 * len(block_df)))
         + alt.Chart(block_df)
         .mark_text(align="left", dx=4, fontSize=12, fontWeight="bold")
         .encode(
@@ -482,6 +493,9 @@ def page_scorecard() -> None:
     # --- Rohwerte ADBE & PYPL: FCF, SBC, Marktkapitalisierung -----------------
     sbc_detail_section()
 
+    # --- Rohwerte PYPL: Cash, Finanzschulden, Nettoverschuldung, OCF, Capex ---
+    pypl_balance_detail_section()
+
 
 def _formula_block(m: TickerMetrics, label: str) -> None:
     """Kompakte Formel-Anzeige fuer einen Ticker: ROIC 5J, FCF-Yield, ND/EBITDA."""
@@ -636,6 +650,95 @@ def sbc_detail_section() -> None:
                        "n/a = Daten fehlen (nie mit 0 gefüllt).")
 
 
+def pypl_balance_detail_section() -> None:
+    """Expander: PYPL-Rohwerte der letzten 4 Jahre -- Cash, Finanzschulden,
+    Nettoverschuldung, OCF, Capex; Markierung, ob Kundengelder in 'Cash'
+    enthalten sind (PayPal Verwahrkundengelder; yfinance-Row 'Deposit
+    Liabilities'/'Customer Deposits')."""
+    st.divider()
+    with st.expander("Rohwerte: PYPL — Cash, Finanzschulden, Nettoverschuldung, OCF, Capex (4 Jahre)",
+                     expanded=False):
+        st.caption("Quelle: yfinance (live). Beträge absolut in Mrd. USD. "
+                   "Finanzschulden = Total Debt (lang- + kurzfristig); Nettoverschuldung = Net Debt "
+                   "(yfinance) bzw. Total Debt − Cash. Kundengelder = 'Deposit Liabilities' "
+                   "(Verwahrkundengelder, in 'Cash And Cash Equivalents' enthalten).")
+        _pypl_balance_detail_inner()
+
+
+def _pypl_balance_detail_inner() -> None:
+    with st.spinner("Lade PYPL (yfinance) …"):
+        companies = _load_reference_tickers(("PYPL",))
+    if not companies:
+        st.info("PYPL konnte nicht live geladen werden (kein yfinance/Netzwerk).")
+        return
+    m = companies[0]
+    cur = "USD"
+    mc = m.market_cap
+    if mc is not None and not mc.is_na():
+        st.write(f"**Marktkapitalisierung:** {mc.value / 1e9:,.2f} Mrd. {mc.currency} "
+                 f"(Stichtag: {m.market_cap_date or 'n/a'})")
+
+    def _m(y: dict, key: str):
+        met = y.get(key)
+        return met
+
+    rows = []
+    years = sorted(m.years, reverse=True)[:4]
+    for fy in years:
+        y = m.years[fy]
+        cash = _m(y, "_cash")
+        td = _m(y, "_total_debt")
+        nd = _m(y, "net_debt")
+        cd = _m(y, "customer_deposits")
+        ocf = _m(y, "operating_cashflow")
+        capex = _m(y, "capex")
+
+        def _b(met) -> str:
+            return "n/a" if (met is None or met.is_na()) else f"{met.value / 1e9:,.2f}"
+
+        # Nettoverschuldung: gemeldetes Net Debt, sonst Total Debt - Cash
+        if nd is not None and not nd.is_na():
+            nd_val, nd_src = nd.value, "Net Debt (gemeldet)"
+        elif td is not None and not td.is_na() and cash is not None and not cash.is_na():
+            nd_val, nd_src = td.value - cash.value, "Total Debt − Cash"
+        else:
+            nd_val, nd_src = float("nan"), "n/a"
+
+        # Kundengelder in Cash? PayPal verwahrt Kundengelder (10-K: in 'Cash and
+        # cash equivalents' enthalten). yfinance meldet keine Deposit-Liabilities-
+        # Zeile -> Pruefung auf 'Restricted Cash' als Naeherung; sonst unbekannt.
+        rc = _m(y, "_restricted_cash")
+        if cd is not None and not cd.is_na() and cash is not None and not cash.is_na() and cash.value > 0:
+            cd_share = cd.value / cash.value
+            cd_note = f"ja — {cd.value / 1e9:,.2f} Mrd. ({cd_share:.0%} von Cash)"
+        elif cd is not None and not cd.is_na():
+            cd_note = f"ja — {cd.value / 1e9:,.2f} Mrd. (Cash n/a)"
+        elif rc is not None and not rc.is_na() and rc.value > 0:
+            cd_note = (f"unbekannt (keine Deposit-Liabilities-Zeile); Restricted Cash "
+                       f"{rc.value / 1e9:,.2f} Mrd. als Naeherung")
+        else:
+            cd_note = ("unbekannt — yfinance meldet keine Deposit-Liabilities-Zeile; "
+                       "lt. 10-K sind Kundengelder in Cash enthalten")
+
+        rows.append({
+            "Jahr": fy,
+            "Cash (Mrd.)": _b(cash),
+            "Finanzschulden (Mrd.)": _b(td),
+            "Nettoverschuldung (Mrd.)": "n/a" if nd_val != nd_val else f"{nd_val / 1e9:,.2f}",
+            "ND-Quelle": nd_src,
+            "OCF (Mrd.)": _b(ocf),
+            "Capex (Mrd.)": _b(capex),
+            "Kundengelder (Mrd.)": "n/a" if (cd is None or cd.is_na()) else f"{cd.value / 1e9:,.2f}",
+            "Restricted Cash (Mrd.)": "n/a" if (rc is None or rc.is_na()) else f"{rc.value / 1e9:,.2f}",
+            "Kundengelder in Cash?": cd_note,
+        })
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    st.caption("Einheit: Mrd. USD (Berichtswährung); Jahr = Geschäftsjahr (Jahresende). "
+               "n/a = Daten fehlen (nie mit 0 gefüllt). PayPal verwahrt Kundengelder "
+               "(Deposit Liabilities); sie sind in 'Cash And Cash Equivalents' enthalten "
+               "und gehören wirtschaftlich nicht zum Unternehmen.")
+
+
 def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     """DCF-Tabelle: Annahmen je Szenario, Jahre 1-10 (FCF, Abzinsungsfaktor,
     Barwert), Terminal Value, Nettoverschuldung, Aktien, innerer Wert je Aktie,
@@ -715,10 +818,14 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
         mos_s = "n/a"
         if vps == vps and price is not None and vps > 0:
             mos_s = f"{(1.0 - price / vps):.1%}"
+        tv_share = "n/a"
+        if sc.enterprise_value == sc.enterprise_value and sc.enterprise_value != 0:
+            tv_share = f"{sc.terminal_value / sc.enterprise_value:.1%}"
         sum_rows.append({
             "Szenario": name,
             f"Barwert FCFs (Mrd. {cur})": f"{sc.pv_fcfs / 1e9:,.2f}",
             f"Terminal Value (Mrd. {cur})": f"{sc.terminal_value / 1e9:,.2f}",
+            "TV-Anteil am Wert": tv_share,
             "Nettoverschuldung": nd_s,
             "Aktien (Mrd.)": f"{dcf.shares / 1e9:,.2f}",
             "Innerer Wert (Mrd.)": "n/a" if sc.enterprise_value != sc.enterprise_value else f"{sc.enterprise_value / 1e9:,.2f}",
@@ -759,6 +866,7 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
                 else:
                     row_v[f"g = {gg:.1%}"] = f"{s['value_per_share']:,.2f} {cur}"
             vps_rows.append(row_v)
+        st.markdown("**Innerer Wert je Aktie** (Base-Pfad) je Kombination")
         st.dataframe(pd.DataFrame(vps_rows), width="stretch", hide_index=True)
         st.caption(f"Innerer Wert je Aktie (Base-Pfad) ueber Diskontsatz × Terminal Growth; "
                    f"Kurs = {'n/a' if price is None else f'{price:,.2f} {cur}'}; "

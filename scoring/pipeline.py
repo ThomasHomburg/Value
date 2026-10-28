@@ -58,6 +58,36 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         price = m.market_cap.value / dcf.shares
     dcf.is_buy = is_buy_candidate(result["total"], dcf, price, cfg)
 
+    # MoS je Szenario + Kandidaten-Begruendung (welche Bedingung fehlt)
+    dc = cfg["dcf"]
+    score_min = float(dc.get("buy_score_min", 70))
+    mos_min = float(dc.get("buy_margin_of_safety_min", 0.30))
+    bear_floor = float(dc.get("buy_bear_floor", 0.80))
+    mos_bear = float("nan")
+    mos_bull = float("nan")
+    bear_vps = dcf.scenarios.get("bear")
+    bull_vps = dcf.scenarios.get("bull")
+    if price == price and price > 0:
+        if bear_vps is not None and bear_vps.value_per_share == bear_vps.value_per_share \
+                and bear_vps.value_per_share > 0:
+            mos_bear = 1.0 - price / bear_vps.value_per_share
+        if bull_vps is not None and bull_vps.value_per_share == bull_vps.value_per_share \
+                and bull_vps.value_per_share > 0:
+            mos_bull = 1.0 - price / bull_vps.value_per_share
+    missing = []
+    if result["total"] != result["total"] or result["total"] < score_min:
+        missing.append(f"Score {result['total']:.1f} < {score_min:.0f}"
+                       if result["total"] == result["total"] else "Score n/a")
+    if dcf.margin_of_safety != dcf.margin_of_safety or dcf.margin_of_safety < mos_min:
+        missing.append(f"MoS Base {dcf.margin_of_safety:.1%} < {mos_min:.0%}"
+                       if dcf.margin_of_safety == dcf.margin_of_safety else "MoS Base n/a")
+    if (bear_vps is None or bear_vps.value_per_share != bear_vps.value_per_share
+            or bear_vps.value_per_share < bear_floor * (price if price == price else float("nan"))):
+        if price == price and bear_vps is not None and bear_vps.value_per_share == bear_vps.value_per_share:
+            missing.append(f"Bear {bear_vps.value_per_share / price:.0%} Kurs < {bear_floor:.0%} Kurs")
+        else:
+            missing.append("Bear n/a")
+
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
 
@@ -108,6 +138,10 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "ev_ebit_med": criteria["ev_ebit_vs_median"].value,
         # Margin of Safety (Base) aus dem DCF-Modul (Build-Schritt 6)
         "margin_of_safety": dcf.margin_of_safety,
+        # MoS je Szenario + Kandidaten-Spalte (ja/nein + fehlende Bedingung)
+        "mos_bear": mos_bear,
+        "mos_bull": mos_bull,
+        "kandidat": "ja" if dcf.is_buy else ("nein: " + "; ".join(missing) if missing else "nein"),
         "dcf_value_per_share_base": dcf.scenarios.get("base").value_per_share
         if dcf.scenarios.get("base") else float("nan"),
         "dcf_value_per_share_bear": dcf.scenarios.get("bear").value_per_share
