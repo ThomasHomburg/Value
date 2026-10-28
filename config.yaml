@@ -15,7 +15,9 @@ data:
   min_points_5y: 3            # Mindestanzahl Datenpunkte fuer 5-Jahres-Kennzahlen
   min_points_3y: 2            # Mindestanzahl Datenpunkte fuer 3-Jahres-Kennzahlen
   min_points_10y: 5           # Mindestanzahl Datenpunkte fuer 10-Jahres-Kennzahlen
-  cagr_min_points: 5          # CAGR: 5 Punkte = Wachstum ueber 4 Jahre (innerhalb des 5-J-Fensters)
+  cagr_min_points: 4          # CAGR: 4 Punkte = Wachstum ueber 3 Intervalle (verfuegbare Jahre)
+  fcf_pos_min_years: 4        # fcf_positive_years: mindestens 4 verfuegbare Jahre (Anteil daran)
+  trend_min_points: 4         # gross_margin_trend: mindestens 4 Punkte (3 Intervalle)
 
 providers:
   # Provider-Auswahl nach Ticker-Suffix (Boersen-Suffix) oder Config.
@@ -71,11 +73,13 @@ criteria:
     full: 10.0
     zero: 3.0
   fcf_positive_years:
+    # Anteil der Jahre mit FCF > 0 an den VERFUEGBAREN Jahren (mindestens 4).
+    # Volle Punkte bei 100 %, null Punkte bei <= 50 % (Anzeige als "x / y").
     block: cashflow
     weight: 0.10
     direction: higher
-    full: 10
-    zero: 5
+    full: 1.0
+    zero: 0.5
   fcf_margin_avg5:
     block: cashflow
     weight: 0.05

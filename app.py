@@ -223,17 +223,55 @@ def page_scorecard() -> None:
     cov = result["coverage"]
     c4.metric("Datenabdeckung", "n/a" if (cov != cov) else f"{cov:.1%}")
 
-    # Block-Scores als Balken
+    # Block-Scores als Balken: jeder Balken mit deutschem Blocknamen und Wert
+    # beschriftet; Bloecke ohne Daten als "n/a" statt als Luecke (Wert 0 mit Label).
     st.subheader("Block-Scores")
-    block_df = pd.DataFrame(
-        [(b, result["blocks"][b] if result["blocks"][b] == result["blocks"][b] else 0.0,
-          result["block_flags"][b]) for b in result["blocks"]],
-        columns=["Block", "Score", "Flag"],
+    BLOCK_NAMES = {
+        "profitability": "Rentabilität",
+        "stability": "Stabilität",
+        "cashflow": "Cashflow",
+        "moat": "Moat",
+        "valuation": "Bewertung",
+    }
+    block_rows = []
+    for b in result["blocks"]:
+        s = result["blocks"][b]
+        label = BLOCK_NAMES.get(b, b)
+        if s != s:  # NaN -> n/a statt Luecke
+            block_rows.append({"Block": label, "Score": 0.0, "Beschriftung": f"{label}: n/a"})
+        else:
+            block_rows.append({"Block": label, "Score": s,
+                               "Beschriftung": f"{label}: {s:.1f}"})
+    block_df = pd.DataFrame(block_rows)
+    block_chart = (
+        alt.Chart(block_df)
+        .mark_bar()
+        .encode(
+            x=alt.X("Score:Q", title="Score (0–100)", scale=alt.Scale(domain=[0, 100])),
+            y=alt.Y("Block:N", sort=list(block_df["Block"]), title=None),
+            color=alt.Color("Score:Q", scale=alt.Scale(scheme="blues"), legend=None),
+            tooltip=[
+                alt.Tooltip("Block:N", title="Block"),
+                alt.Tooltip("Score:Q", title="Score", format=".1f"),
+            ],
+        )
+        .properties(height=max(120, 32 * len(block_df)))
+        + alt.Chart(block_df)
+        .mark_text(align="left", dx=4, fontSize=12, fontWeight="bold")
+        .encode(
+            x=alt.X("Score:Q"),
+            y=alt.Y("Block:N", sort=list(block_df["Block"])),
+            text=alt.Text("Beschriftung:N"),
+        )
     )
-    st.bar_chart(block_df.set_index("Block")["Score"])
+    st.altair_chart(block_chart, use_container_width=True)
     for _, r in block_df.iterrows():
-        flag = f" [!] {r['Flag']} (>30 % fehlende Daten)" if r["Flag"] else ""
-        st.write(f"- **{r['Block']}**: {r['Score']:.1f} / 100{flag}")
+        flag = ""
+        for b, f in result["block_flags"].items():
+            if BLOCK_NAMES.get(b, b) == r["Block"] and f:
+                flag = f" [!] {f} (>30 % fehlende Daten)"
+        score_str = "n/a" if r["Beschriftung"].endswith("n/a") else f"{r['Score']:.1f} / 100"
+        st.write(f"- **{r['Block']}**: {score_str}{flag}")
 
     # Kriterien im Detail (inkl. "Daten duenn"-Markierung bei < thin_years Jahren)
     st.subheader("Kriterien im Detail")
@@ -246,10 +284,11 @@ def page_scorecard() -> None:
         elif name in ("roic_avg5", "roe_avg5", "fcf_margin_avg5", "revenue_cagr_5y", "fcf_yield_sbc_avg3"):
             val_str = f"{crit.value:.1%}"
         elif name == "fcf_positive_years":
-            val_str = f"{crit.value:.0f} / 10"
+            total_years = crit.years_total or crit.years_available
+            val_str = f"{crit.value * total_years:.0f} / {total_years} ({crit.value:.0%})"
         else:
             val_str = f"{crit.value:.1f}"
-        years = f"{crit.years_available} J." + (" [!] Daten duenn" if crit.thin else "")
+        years = f"Daten dünn ({crit.years_available} J.)" if crit.thin else f"{crit.years_available} J."
         crit_rows.append({
             "Kriterium": name, "Block": cfg_c["block"], "Gewicht": f"{cfg_c['weight']:.1%}",
             "Wert": val_str, "Punkte": "n/a" if (pts != pts) else f"{pts:.1f}",
@@ -257,8 +296,8 @@ def page_scorecard() -> None:
         })
     st.dataframe(pd.DataFrame(crit_rows), width="stretch", hide_index=True)
     if res.get("thin_criteria"):
-        st.caption(f"[!] 'Daten duenn' = weniger als {CFG['data'].get('thin_years', 5)} Jahre Daten "
-                   f"(Fenster: {CFG['data'].get('years', 5)} J.) – Score-Aussage eingeschraenkt.")
+        st.caption(f"'Daten dünn (x J.)' = weniger als {CFG['data'].get('thin_years', 5)} Jahre Daten "
+                   f"(Fenster: {CFG['data'].get('years', 5)} J.) – Score-Aussage eingeschränkt.")
 
     # ROIC: Definition + Rohwerte mit Einheit/Waehrung (neuestes FY)
     st.subheader("ROIC – Definition und Rohwerte (neuestes FY)")
@@ -584,58 +623,140 @@ def sbc_detail_section() -> None:
 
 
 def dcf_section(m: TickerMetrics, row: dict | None) -> None:
-    """DCF-Tabelle: Annahmen + Jahres-Cashflows + innerer Wert je Aktie je Szenario."""
-    from valuation.dcf import compute_dcf
+    """DCF-Tabelle: Annahmen je Szenario, Jahre 1-10 (FCF, Abzinsungsfaktor,
+    Barwert), Terminal Value, Nettoverschuldung, Aktien, innerer Wert je Aktie,
+    Kurs und MoS je Szenario + Sensitivitaetstabelle."""
+    from valuation.dcf import compute_dcf, sensitivity_mos_base
     dcf = compute_dcf(m, CFG)
     dc = CFG["dcf"]
-    if dcf.fcf_normalized != dcf.fcf_normalized:
+    if dcf.fcf_normalized != dcf.fcf_normalized or not dcf.scenarios:
         st.info("DCF nicht berechenbar (kein FCF nach SBC oder keine Marktkapitalisierung).")
         return
     cur = m.market_cap.currency if m.market_cap else "n/a"
+    r = dcf.discount_rate
+    g_term = dcf.terminal_growth
+    cap = dc.get("base_growth_cap", 0.06)
+    mult = dc.get("bull_growth_multiplier", 1.3)
+    bull_cap = dc.get("bull_growth_cap", 0.10)
+    fade = dc.get("fade_to_growth", 0.025)
+    cagr_s = "n/a" if dcf.revenue_cagr != dcf.revenue_cagr else f"{dcf.revenue_cagr:.1%}"
+
+    # --- Annahmen je Szenario ---
+    st.markdown("**Annahmen je Szenario**")
+    ann_rows = []
+    for name in ("Bear", "Base", "Bull"):
+        sc = dcf.scenarios.get(name.lower())
+        g5_val = sc.growth_rates[0] if sc else float("nan")
+        ann_rows.append({
+            "Szenario": name,
+            "Start-FCF nach SBC (Ø 3 J.)": f"{dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur}",
+            "Wachstum J. 1–5": "n/a" if g5_val != g5_val else f"{g5_val:.1%}",
+            "Wachstum J. 6–10": f"linear auf {fade:.1%}",
+            "Terminal Growth": f"{g_term:.1%}",
+            "Diskontsatz": f"{r:.1%}",
+        })
+    st.dataframe(pd.DataFrame(ann_rows), width="stretch", hide_index=True)
     st.caption(
         f"Normalisierter FCF (Ø {dcf.fcf_years_used} Jahre, nach SBC): "
-        f"**{dcf.fcf_normalized / 1e9:,.2f} Mrd. {cur}** · "
-        f"Umsatz-CAGR (verfügbare Jahre): {'n/a' if dcf.revenue_cagr != dcf.revenue_cagr else f'{dcf.revenue_cagr:.1%}'} · "
-        f"Diskontsatz: {dcf.discount_rate:.1%} · Terminal Growth: {dcf.terminal_growth:.1%} · "
-        f"Verwässerte Aktien: {dcf.shares / 1e9:,.2f} Mrd."
+        f"**{dcf.fcf_normalized / 1e9:,.2f} Mrd. Berichtswährung** "
+        f"→ {dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur} (FX) · "
+        f"Umsatz-CAGR (verfügbare Jahre): {cagr_s} · "
+        f"Verwässerte Aktien: {dcf.shares / 1e9:,.2f} Mrd. · "
+        "Wachstum: Bear 0 % (J. 1–5) · Base = min(CAGR, "
+        f"{cap:.0%}) · Bull = min(CAGR × {mult:.1f}, {bull_cap:.0%}); "
+        f"J. 6–10 linear auf {fade:.1%}. Terminal Value = FCF_10 × (1 + g) / (r − g)."
     )
-    st.markdown(
-        "**Wachstum:** Bear 0 % (Jahre 1–5) · Base = min(CAGR, "
-        f"{dc.get('base_growth_cap', 0.06):.0%}) · Bull = min(CAGR × "
-        f"{dc.get('bull_growth_multiplier', 1.3):.1f}, {dc.get('bull_growth_cap', 0.10):.0%}); "
-        f"Jahre 6–10 linear auf {dc.get('fade_to_growth', 0.025):.1%}. "
-        "Terminal Value = FCF_10 x (1 + g) / (r - g)."
-    )
+
+    # --- Jahre 1-10: FCF, Abzinsungsfaktor, Barwert je Szenario ---
+    st.markdown("**Projizierte Cashflows (Jahre 1–10)**")
     rows = []
     for name in ("bear", "base", "bull"):
         sc = dcf.scenarios.get(name)
         if sc is None:
             continue
         for i, (g, f) in enumerate(zip(sc.growth_rates, sc.fcfs), start=1):
+            df_ = 1.0 / (1.0 + r) ** i
             rows.append({
                 "Szenario": name, "Jahr": i, "Wachstum": f"{g:.1%}",
-                "FCF (Mrd. " + cur + ")": f"{f / 1e9:,.2f}",
+                f"FCF (Mrd. {cur})": f"{f / 1e9:,.2f}",
+                "Abzinsungsfaktor": f"{df_:.4f}",
+                f"Barwert (Mrd. {cur})": f"{f * df_ / 1e9:,.2f}",
             })
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    # --- Nettoverschuldung, Aktien, innerer Wert je Aktie, Kurs, MoS ---
+    latest_fy = max(m.years)
+    nd_m = m.years[latest_fy].get("net_debt")
+    nd_val = "n/a" if (nd_m is None or nd_m.is_na()) else nd_m.value
+    nd_s = "n/a" if nd_val != nd_val else f"{nd_val / 1e9:,.2f} Mrd. {nd_m.currency}"
+    price = None
+    if m.market_cap is not None and not m.market_cap.is_na() and dcf.shares == dcf.shares:
+        price = m.market_cap.value / dcf.shares
     sum_rows = []
     for name in ("bear", "base", "bull"):
         sc = dcf.scenarios.get(name)
         if sc is None:
             continue
+        vps = sc.value_per_share
+        mos_s = "n/a"
+        if vps == vps and price is not None and vps > 0:
+            mos_s = f"{(1.0 - price / vps):.1%}"
         sum_rows.append({
             "Szenario": name,
-            "Barwert FCFs (Mrd.)": f"{sc.pv_fcfs / 1e9:,.2f}",
-            "Barwert Terminal (Mrd.)": f"{sc.terminal_value / 1e9:,.2f}",
-            "Innerer Wert (Mrd.)": f"{sc.enterprise_value / 1e9:,.2f}",
-            "Wert je Aktie": "n/a" if sc.value_per_share != sc.value_per_share else f"{sc.value_per_share:,.2f} {cur}",
+            f"Barwert FCFs (Mrd. {cur})": f"{sc.pv_fcfs / 1e9:,.2f}",
+            f"Terminal Value (Mrd. {cur})": f"{sc.terminal_value / 1e9:,.2f}",
+            "Nettoverschuldung": nd_s,
+            "Aktien (Mrd.)": f"{dcf.shares / 1e9:,.2f}",
+            "Innerer Wert (Mrd.)": "n/a" if sc.enterprise_value != sc.enterprise_value else f"{sc.enterprise_value / 1e9:,.2f}",
+            "Wert je Aktie": "n/a" if vps != vps else f"{vps:,.2f} {cur}",
+            "Kurs": "n/a" if price is None else f"{price:,.2f} {cur}",
+            "MoS": mos_s,
         })
     st.dataframe(pd.DataFrame(sum_rows), width="stretch", hide_index=True)
-    price = None
-    if m.market_cap is not None and not m.market_cap.is_na() and dcf.shares == dcf.shares:
-        price = m.market_cap.value / dcf.shares
     mos = dcf.margin_of_safety
     st.write(f"**Kurs:** {'n/a' if price is None else f'{price:,.2f} {cur}'} · "
              f"**Margin of Safety (Base):** {'n/a' if mos != mos else f'{mos:.1%}'}")
+
+    # --- Sensitivitaetstabelle: MoS (Base) ueber Diskontsatz x Terminal Growth ---
+    st.markdown("**Sensitivität: MoS (Base) je Aktie**")
+    sens = sensitivity_mos_base(m, CFG)
+    if sens:
+        rates = sorted({s["discount_rate"] for s in sens})
+        gs = sorted({s["terminal_growth"] for s in sens})
+        grid = {(s["discount_rate"], s["terminal_growth"]): s for s in sens}
+        sens_rows = []
+        for rr in rates:
+            row_s = {"Diskontsatz \\ Terminal Growth": f"{rr:.0%}"}
+            for gg in gs:
+                s = grid.get((rr, gg))
+                if s is None or s["mos"] != s["mos"]:
+                    row_s[f"g = {gg:.1%}"] = "n/a"
+                else:
+                    row_s[f"g = {gg:.1%}"] = f"{s['mos']:.1%}"
+            sens_rows.append(row_s)
+        st.dataframe(pd.DataFrame(sens_rows), width="stretch", hide_index=True)
+        vps_rows = []
+        for rr in rates:
+            row_v = {"Diskontsatz \\ Terminal Growth": f"{rr:.0%}"}
+            for gg in gs:
+                s = grid.get((rr, gg))
+                if s is None or s["value_per_share"] != s["value_per_share"]:
+                    row_v[f"g = {gg:.1%}"] = "n/a"
+                else:
+                    row_v[f"g = {gg:.1%}"] = f"{s['value_per_share']:,.2f} {cur}"
+            vps_rows.append(row_v)
+        st.dataframe(pd.DataFrame(vps_rows), width="stretch", hide_index=True)
+        st.caption(f"Innerer Wert je Aktie (Base-Pfad) ueber Diskontsatz × Terminal Growth; "
+                   f"Kurs = {'n/a' if price is None else f'{price:,.2f} {cur}'}; "
+                   f"MoS (Base) = 1 − Kurs / Wert je Aktie. "
+                   f"Aktuell: Wert je Aktie Bear/Base/Bull = "
+                   + ", ".join(
+                       ("n/a" if dcf.scenarios[n].value_per_share != dcf.scenarios[n].value_per_share
+                        else f"{dcf.scenarios[n].value_per_share:,.2f} {cur}")
+                       for n in ("bear", "base", "bull") if n in dcf.scenarios)
+                   + f"; Kurs = {'n/a' if price is None else f'{price:,.2f} {cur}'}; "
+                     f"MoS (Base) = {'n/a' if mos != mos else f'{mos:.1%}'}.")
+
     buy = bool(row and row.get("is_buy"))
     if buy:
         st.success("[KAUF] Kaufkandidat (Score >= 70, MoS Base >= 30 %, Bear >= 80 % des Kurses)")

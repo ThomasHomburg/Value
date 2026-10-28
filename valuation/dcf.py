@@ -49,6 +49,7 @@ class DcfResult:
     scenarios: dict[str, DcfScenario] = field(default_factory=dict)
     margin_of_safety: float = float("nan")   # MoS Base = 1 - Kurs / Wert je Aktie (Base)
     is_buy: bool = False           # Kaufkandidat (Score/MoS/Bear-Regeln, siehe pipeline)
+    fcf_normalized_conv: float = float("nan")  # normalisierter FCF in Marktkap.-Waehrung
 
 
 def _cagr(values: list[float]) -> float:
@@ -138,6 +139,7 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
     fcf_conv = converter.convert(fcf_norm, fcf_cur, mcap.currency, latest_fy)
     if math.isnan(fcf_conv):
         return result
+    result.fcf_normalized_conv = fcf_conv
 
     for name, g5 in (("bear", g_bear), ("base", g_base), ("bull", g_bull)):
         rates = _growth_path(g5, g_terminal, dcfg)
@@ -163,6 +165,66 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
         if price == price and price > 0:
             result.margin_of_safety = 1.0 - price / base.value_per_share
     return result
+
+
+def sensitivity_mos_base(m: TickerMetrics, cfg: dict, fx=None,
+                         discount_rates=(0.08, 0.09, 0.10, 0.11),
+                         terminal_growths=(0.02, 0.025, 0.03)) -> list[dict]:
+    """Sensitivitaet: MoS (Base) je Aktie fuer Diskontsatz x Terminal Growth.
+
+    Pro Kombination (r, g) wird der Base-Szenario-Pfad (Wachstum aus der
+    CAGR, wie in compute_dcf) mit dem jeweiligen r/g neu diskontiert.
+    Rueckgabe: [{discount_rate, terminal_growth, value_per_share, mos}].
+    """
+    dcfg = cfg["dcf"]
+    nan = float("nan")
+    base_res = compute_dcf(m, cfg, fx=fx)
+    if base_res.fcf_normalized != base_res.fcf_normalized:
+        return []
+    mcap = m.market_cap
+    if mcap is None or mcap.is_na() or mcap.value <= 0:
+        return []
+    if base_res.shares != base_res.shares or base_res.shares <= 0:
+        return []
+
+    # FCF in Marktkap.-Waehrung (wie in compute_dcf)
+    sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
+                  if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
+    converter = fx
+    if converter is None:
+        from data.metrics import _NoFX
+        converter = _NoFX()
+    latest_fy = max(m.years)
+    fcf_conv = converter.convert(base_res.fcf_normalized, sbc_series[-1].currency,
+                                 mcap.currency, latest_fy)
+    if math.isnan(fcf_conv):
+        return []
+
+    price = mcap.value / base_res.shares
+    cagr = base_res.revenue_cagr
+    base_cap = float(dcfg.get("base_growth_cap", 0.06))
+    g5 = 0.0 if cagr != cagr else min(cagr, base_cap)
+    rates = _growth_path(g5, float(dcfg.get("fade_to_growth", 0.025)), dcfg)
+    fcfs, fcf_t = [], fcf_conv
+    for g in rates:
+        fcf_t = fcf_t * (1.0 + g)
+        fcfs.append(fcf_t)
+
+    out = []
+    for r in discount_rates:
+        for g in terminal_growths:
+            if r <= g:
+                out.append({"discount_rate": r, "terminal_growth": g,
+                            "value_per_share": nan, "mos": nan})
+                continue
+            pv_fcfs = sum(_pv(f, r, i + 1) for i, f in enumerate(fcfs))
+            tv = fcfs[-1] * (1.0 + g) / (r - g)
+            ev = pv_fcfs + _pv(tv, r, 10)
+            vps = ev / base_res.shares
+            mos = 1.0 - price / vps if vps > 0 else nan
+            out.append({"discount_rate": r, "terminal_growth": g,
+                        "value_per_share": vps, "mos": mos})
+    return out
 
 
 def is_buy_candidate(score: float, dcf: DcfResult, current_price: float, cfg: dict) -> bool:

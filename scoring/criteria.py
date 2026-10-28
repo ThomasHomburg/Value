@@ -26,6 +26,7 @@ class CriterionResult:
     is_na: bool
     years_available: int = 0
     thin: bool = False
+    years_total: int = 0  # Fensterlaenge (Basis der Kennzahl), z. B. "4 / 4" bei fcf_positive_years
 
 
 Calc = Callable[[TickerMetrics, dict, Any], CriterionResult]
@@ -123,12 +124,21 @@ def calc_interest_coverage(m: TickerMetrics, cfg, _fx) -> CriterionResult:
 
 
 def calc_fcf_positive_years(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Anteil der Jahre mit FCF > 0 an den VERFUEGBAREN Jahren (mindestens 4).
+
+    Weniger als 10 verfuegbare Jahre werden nicht gegen 10 bewertet, sondern
+    gegen die tatsaechliche Anzahl (z. B. 4/4 -> 100 %). Anzeige als "4 / 4".
+    Volle Punkte bei 100 %, null Punkte bei <= 50 % (Schwellen in config.yaml).
+    """
     thin = cfg["thin_years"]
     years = _year_count(m, "fcf")
     vals = [v for _, v in _values(m, "fcf")]
-    if len(vals) < cfg["min_points_5y"]:
+    if len(vals) < cfg["fcf_pos_min_years"]:
         return _result(float("nan"), True, years, thin)
-    return _result(float(sum(1 for v in vals[-10:] if v > 0)), False, years, thin)
+    share = sum(1 for v in vals if v > 0) / len(vals)
+    res = _result(share, False, years, thin)
+    res.years_total = len(vals)
+    return res
 
 
 def calc_fcf_margin_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
@@ -154,19 +164,24 @@ def calc_gross_margin_trend(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     gp = dict(_values(m, "gross_profit"))
     rev = dict(_values(m, "revenue"))
     margins = [gp[fy] / rev[fy] for fy in sorted(set(gp) & set(rev)) if rev[fy] != 0]
-    if len(margins) < cfg["min_points_10y"]:
+    if len(margins) < cfg["trend_min_points"]:
         return _result(float("nan"), True, years, thin)
     return _result(_slope(margins) * 100, False, years, thin)
 
 
 def calc_revenue_cagr_5y(m: TickerMetrics, cfg, _fx) -> CriterionResult:
-    """Umsatz-CAGR ueber das 5-Jahres-Fenster (5 Punkte = 4 Jahre Wachstum)."""
+    """Umsatz-CAGR ueber die verfuegbaren Jahre (mindestens 4 Punkte = 3 Intervalle).
+
+    Konsistent mit der CAGR im DCF (valuation/dcf.py): dort wird ebenfalls die
+    CAGR ueber alle verfuegbaren Jahre gebildet. Die tatsaechliche Fensterlaenge
+    ist in years_available sichtbar.
+    """
     thin = cfg["thin_years"]
     years = _year_count(m, "revenue")
     vals = [v for _, v in _values(m, "revenue")]
     if len(vals) < cfg["cagr_min_points"]:
         return _result(float("nan"), True, years, thin)
-    return _result(_cagr(vals[-5:]), False, years, thin)
+    return _result(_cagr(vals), False, years, thin)
 
 
 def calc_fcf_yield_sbc_avg3(m: TickerMetrics, cfg, fx) -> CriterionResult:
@@ -247,6 +262,8 @@ def compute_criteria(m: TickerMetrics, cfg: dict, fx=None) -> dict[str, Criterio
         "min_points_5y": data_cfg.get("min_points_5y", 3),
         "min_points_3y": data_cfg.get("min_points_3y", 2),
         "min_points_10y": data_cfg.get("min_points_10y", 5),
-        "cagr_min_points": data_cfg.get("cagr_min_points", 5),
+        "cagr_min_points": data_cfg.get("cagr_min_points", 4),
+        "fcf_pos_min_years": data_cfg.get("fcf_pos_min_years", 4),
+        "trend_min_points": data_cfg.get("trend_min_points", 4),
     }
     return {name: calc(m, calc_cfg, fx) for name, calc in CRITERIA.items()}
