@@ -130,6 +130,11 @@ class YfinanceProvider:
             inc_col = next((c for c in all_cols["inc"] if int(c.year) == fy), None)
             bal_col = next((c for c in all_cols["bal"] if int(c.year) == fy), None)
             cf_col = next((c for c in all_cols["cf"] if int(c.year) == fy), None)
+            # Exaktes Geschaeftsjahres-Enddatum ( fuer TTM-Nicht-Ueberlappung)
+            for c in (inc_col, bal_col, cf_col):
+                if c is not None:
+                    result.fiscal_ends[fy] = c.date().isoformat()
+                    break
 
             if inc_col is not None:
                 for key in ("revenue", "gross_profit", "ebit", "ebitda", "net_income",
@@ -186,4 +191,34 @@ class YfinanceProvider:
             result.years[fy] = year_metrics
 
         logger.info("%s: %d Jahre von yfinance geladen (Waehrung %s)", ticker, len(result.years), currency)
+
+        # --- TTM aus Quartalsdaten (Flussgroessen Summe letzte 4 Quartale,
+        # Bestandsgoessen Stichtag letztes Quartal) ---
+        ttm = self._load_ttm(tk, result, currency, fy_hint=int(financials.columns[0].year))
+        if ttm is not None:
+            result.ttm = ttm
+            result.ttm_plausible = ttm.plausible
+            result.ttm_fallback = ttm.fall_back_to_annual
+            if not ttm.plausible:
+                logger.warning("%s: %s", ticker, "; ".join(ttm.checks))
         return result
+
+    def _load_ttm(self, tk, result: TickerMetrics, currency: str, fy_hint: int):
+        """Laedt Quartalsdaten und berechnet TTM (data/ttm.py).
+
+        Rueckgabe: TtmResult oder None, wenn keine Quartalsdaten verfuegbar.
+        """
+        try:
+            q_inc = tk.quarterly_financials
+            q_bal = tk.quarterly_balance_sheet
+            q_cf = tk.quarterly_cashflow
+        except Exception as exc:
+            logger.warning("TTM: Quartalsdaten nicht ladbar: %s", exc)
+            return None
+        if q_inc is None or q_inc.empty:
+            return None
+        from data.ttm import compute_ttm
+        # result traegt bereits die Jahresdaten -> Vergleich TTM vs. Jahreswert
+        return compute_ttm(result, {
+            "income": q_inc, "balance": q_bal, "cashflow": q_cf, "row_map": _ROW_MAP,
+        })

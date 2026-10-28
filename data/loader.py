@@ -37,6 +37,14 @@ class TickerMetrics:
     market_cap: Metric | None = None
     market_cap_date: str = ""  # Stichtag der Marktkapitalisierung (ISO-Datum, Abrufdatum)
     years: dict[str, dict[str, Metric]] = field(default_factory=dict)
+    # TTM (Quartalsdaten): Flussgroessen = Summe letzte 4 Quartale,
+    # Bestandsgoessen = Stichtag letztes Quartal (nur yfinance-Provider).
+    ttm: object | None = None            # data.ttm.TtmResult
+    ttm_plausible: bool = True           # False -> Flag "Quartalsdaten unplausibel"
+    ttm_fallback: bool = False           # True -> Rueckfall auf Geschaeftsjahre
+    # Exaktes Geschaeftsjahres-Enddatum je Jahr (ISO) -- fuer die TTM-Basis
+    # (nicht ueberlappende Geschaeftsjahre vor dem TTM-Fenster).
+    fiscal_ends: dict[int, str] = field(default_factory=dict)
 
     def series(self, metric_name: str) -> list[Metric]:
         """Kennzahl chronologisch (aeltestes Jahr zuerst)."""
@@ -142,6 +150,12 @@ def extract_metrics(
         inc = inc_y.get(fy, {})
         bal = bal_y.get(fy, {})
         cf = cf_y.get(fy, {})
+        # Exaktes Geschaeftsjahres-Enddatum (erstes verfuegbares Statement-Datum)
+        for row in (inc, bal, cf):
+            d = row.get("date")
+            if d:
+                result.fiscal_ends[fy] = str(d)[:10]
+                break
         # FMP-Statements tragen die Waehrung im Feld "reportedCurrency".
         currency = (
             inc.get("reportedCurrency") or inc.get("currency")

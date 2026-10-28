@@ -50,6 +50,9 @@ class DcfResult:
     margin_of_safety: float = float("nan")   # MoS Base = 1 - Kurs / Wert je Aktie (Base)
     is_buy: bool = False           # Kaufkandidat (Score/MoS/Bear-Regeln, siehe pipeline)
     fcf_normalized_conv: float = float("nan")  # normalisierter FCF in Marktkap.-Waehrung
+    fcf_basis: str = "annual"   # "ttm" (Ø TTM + 2 nicht ueberlappende GJ) oder "annual" (Rueckfall)
+    ttm_quarter_end: str = ""   # Stichtag letztes Quartal (ISO), nur bei fcf_basis="ttm"
+    fcf_sources: list = field(default_factory=list)  # verwendete FCF-SBC-Werte [TTM, FY-1, FY-2]
 
 
 def _cagr(values: list[float]) -> float:
@@ -90,15 +93,63 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
         shares=nan,
     )
 
-    # --- normalisierter FCF nach SBC: Ø der letzten 3 Jahre mit Daten -------
-    sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
-                  if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
-    if not sbc_series:
-        return result
-    last3 = sbc_series[-3:]
-    fcf_norm = sum(x.value for x in last3) / len(last3)
-    result.fcf_normalized = fcf_norm
-    result.fcf_years_used = len(last3)
+    # --- normalisierter FCF nach SBC ----------------------------------------
+    # TTM-Basis (falls Quartalsdaten plausibel): Ø aus TTM (letzte 4 Quartale)
+    # und den zwei davor liegenden, NICHT ueberlappenden Geschaeftsjahren.
+    # Nicht ueberlappend: das Geschaeftsjahr muss vor dem ersten Quartal des
+    # TTM-Fensters enden (exaktes FY-Enddatum vs. erstes TTM-Quartal).
+    # Rueckfall: Ø der letzten 3 Geschaeftsjahre (bisheriges Verhalten).
+    ttm = getattr(m, "ttm", None)
+    ttm_fcf = None
+    use_ttm = (ttm is not None and getattr(m, "ttm_plausible", True)
+               and not getattr(m, "ttm_fallback", False))
+    if use_ttm:
+        ttm_fcf = ttm.ttm.get("fcf_sbc")
+        ttm_end = ttm.quarter_end  # ISO-Stichtag letztes Quartal
+        # erstes Quartal des TTM-Fensters = ttm_end - 9 Monate (naeherung)
+        from datetime import date as _date
+        y, mo, d = (int(x) for x in ttm_end.split("-"))
+        first_q_month = ((mo - 10) % 12) + 1   # 9 Monate vor Endmonat
+        first_q_year = y - (1 if mo <= 9 else 0)
+        window_start = _date(first_q_year, first_q_month, 1)
+        # Geschaeftsjahre, deren Enddatum STRICT vor dem TTM-Fenster liegt
+        prior_fys = []
+        for fy in sorted(m.years, reverse=True):
+            fe = m.fiscal_ends.get(fy)
+            if not fe:
+                continue
+            fy_end = _date.fromisoformat(fe)
+            if fy_end < window_start:
+                prior_fys.append(fy)
+        fy_vals = []
+        for fy in prior_fys[:2]:
+            met = m.years[fy].get("fcf_sbc")
+            if met is not None and not met.is_na():
+                fy_vals.append((fy, met.value, met.currency))
+        if (ttm_fcf is not None and not ttm_fcf.is_na() and len(fy_vals) >= 2):
+            vals = [ttm_fcf.value] + [v for _, v, _ in fy_vals]
+            fcf_norm = sum(vals) / len(vals)
+            result.fcf_normalized = fcf_norm
+            result.fcf_years_used = len(vals)
+            result.fcf_basis = "ttm"
+            result.ttm_quarter_end = ttm_end
+            result.fcf_sources = ([("TTM", ttm_fcf.value, ttm_fcf.currency)]
+                                  + [(f"FY{fy}", v, c) for fy, v, c in fy_vals])
+        else:
+            use_ttm = False  # nicht genug nicht-ueberlappende GJ -> Rueckfall
+    if not use_ttm:
+        sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
+                      if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
+        if not sbc_series:
+            return result
+        last3 = sbc_series[-3:]
+        fcf_norm = sum(x.value for x in last3) / len(last3)
+        result.fcf_normalized = fcf_norm
+        result.fcf_years_used = len(last3)
+        result.fcf_basis = "annual"
+        fys = sorted(m.years)[-len(last3):]
+        result.fcf_sources = [(f"FY{fy}", x.value, x.currency)
+                              for fy, x in zip(fys, last3)]
 
     # --- Umsatz-CAGR ueber verfuegbare Jahre (Basis-Wachstum) ---------------
     rev_series = [m.years[fy]["revenue"] for fy in sorted(m.years)
@@ -135,7 +186,11 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
         from data.metrics import _NoFX
         converter = _NoFX()
     latest_fy = max(m.years)
-    fcf_cur = sbc_series[-1].currency
+    # Waehrung der FCF-Quelle: TTM-Metric bzw. letztes verwendetes Jahr
+    if result.fcf_basis == "ttm" and ttm_fcf is not None:
+        fcf_cur = ttm_fcf.currency
+    else:
+        fcf_cur = sbc_series[-1].currency
     fcf_conv = converter.convert(fcf_norm, fcf_cur, mcap.currency, latest_fy)
     if math.isnan(fcf_conv):
         return result
@@ -187,15 +242,19 @@ def sensitivity_mos_base(m: TickerMetrics, cfg: dict, fx=None,
     if base_res.shares != base_res.shares or base_res.shares <= 0:
         return []
 
-    # FCF in Marktkap.-Waehrung (wie in compute_dcf)
-    sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
-                  if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
+    # FCF in Marktkap.-Waehrung (wie in compute_dcf: TTM-Waehrung falls TTM-Basis)
     converter = fx
     if converter is None:
         from data.metrics import _NoFX
         converter = _NoFX()
     latest_fy = max(m.years)
-    fcf_conv = converter.convert(base_res.fcf_normalized, sbc_series[-1].currency,
+    if base_res.fcf_basis == "ttm" and base_res.fcf_sources:
+        fcf_cur = base_res.fcf_sources[0][2]
+    else:
+        sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
+                      if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
+        fcf_cur = sbc_series[-1].currency
+    fcf_conv = converter.convert(base_res.fcf_normalized, fcf_cur,
                                  mcap.currency, latest_fy)
     if math.isnan(fcf_conv):
         return []

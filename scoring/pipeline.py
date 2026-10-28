@@ -112,6 +112,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         flag_parts.append("kl.Kapital")
         logger.info("%s: ROIC 5 J = %.1f%% > 100%% -> Flag 'Kapitalbasis klein' (kleine/negative Kapitalbasis)",
                     m.ticker, roic5 * 100)
+    # TTM unplausibel -> Flag + Log (Rueckfall auf Geschaeftsjahre im DCF)
+    if getattr(m, "ttm", None) is not None and not getattr(m, "ttm_plausible", True):
+        flag_parts.append("ttm:unplausibel")
+        logger.warning("%s: Quartalsdaten unplausibel -> Rueckfall auf Geschaeftsjahre (DCF-Basis)",
+                       m.ticker)
     if dcf.is_buy:
         flag_parts.append("kauf")
         logger.info("%s: Kaufkandidat (Score %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
@@ -142,6 +147,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "mos_bear": mos_bear,
         "mos_bull": mos_bull,
         "kandidat": "ja" if dcf.is_buy else ("nein: " + "; ".join(missing) if missing else "nein"),
+        # TTM-Basis des DCF (Scorecard-Anzeige: Stichtag + Basis)
+        "dcf_fcf_basis": dcf.fcf_basis,
+        "dcf_ttm_quarter_end": dcf.ttm_quarter_end,
+        "dcf_fcf_sources": dcf.fcf_sources,
+        "ttm_plausible": getattr(m, "ttm_plausible", True),
         "dcf_value_per_share_base": dcf.scenarios.get("base").value_per_share
         if dcf.scenarios.get("base") else float("nan"),
         "dcf_value_per_share_bear": dcf.scenarios.get("bear").value_per_share

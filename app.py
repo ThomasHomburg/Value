@@ -225,6 +225,9 @@ def page_scorecard() -> None:
     criteria = res["criteria"]
 
     st.subheader(f"{m.name} ({m.ticker}) – {m.sector}, Land: {m.country or 'n/a'}")
+    if getattr(m, "ttm", None) is not None and not getattr(m, "ttm_plausible", True):
+        st.warning("[!] Quartalsdaten unplausibel (Abweichung > 2 % zum Jahreswert) "
+                   "→ DCF-Basis fällt auf Geschäftsjahre zurück.")
     if m.market_cap is not None and not m.market_cap.is_na():
         st.write(f"Marktkapitalisierung: **{m.market_cap.value / 1e9:,.2f} Mrd. {m.market_cap.currency}**  "
                  f"(Stichtag: {m.market_cap_date or 'n/a'}, Quelle: {m.source or 'unbekannt'}; "
@@ -764,19 +767,32 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     for name in ("Bear", "Base", "Bull"):
         sc = dcf.scenarios.get(name.lower())
         g5_val = sc.growth_rates[0] if sc else float("nan")
+        basis_short = ("TTM Ø" if dcf.fcf_basis == "ttm" else "Ø GJ")
         ann_rows.append({
             "Szenario": name,
-            "Start-FCF nach SBC (Ø 3 J.)": f"{dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur}",
+            f"Start-FCF nach SBC ({basis_short})": f"{dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur}",
             "Wachstum J. 1–5": "n/a" if g5_val != g5_val else f"{g5_val:.1%}",
             "Wachstum J. 6–10": f"linear auf {fade:.1%}",
             "Terminal Growth": f"{g_term:.1%}",
             "Diskontsatz": f"{r:.1%}",
         })
     st.dataframe(pd.DataFrame(ann_rows), width="stretch", hide_index=True)
+    # TTM-Basis: Stichtag des letzten Quartals + verwendete Quellen
+    if dcf.fcf_basis == "ttm" and dcf.ttm_quarter_end:
+        basis_label = f"TTM bis {dcf.ttm_quarter_end[:7]} (Stichtag {dcf.ttm_quarter_end})"
+        src_labels = " + ".join(name for name, _, _ in dcf.fcf_sources)
+        basis_note = (f"**Basis: {basis_label}** — Ø aus {src_labels} "
+                      f"(TTM + nicht überlappende Geschäftsjahre)")
+    else:
+        src_labels = " + ".join(name for name, _, _ in dcf.fcf_sources) if dcf.fcf_sources else ""
+        basis_note = (f"Basis: Geschäftsjahre (Ø letzte {dcf.fcf_years_used} Jahre"
+                      + (f" — {src_labels}" if src_labels else "") + ")"
+                      + (" · [!] Quartalsdaten unplausibel → Rückfall" if not getattr(m, "ttm_plausible", True) else ""))
     st.caption(
-        f"Normalisierter FCF (Ø {dcf.fcf_years_used} Jahre, nach SBC): "
+        f"Normalisierter FCF (Ø {dcf.fcf_years_used} Perioden, nach SBC): "
         f"**{dcf.fcf_normalized / 1e9:,.2f} Mrd. Berichtswährung** "
         f"→ {dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur} (FX) · "
+        f"{basis_note} · "
         f"Umsatz-CAGR (verfügbare Jahre): {cagr_s} · "
         f"Verwässerte Aktien: {dcf.shares / 1e9:,.2f} Mrd. · "
         "Wachstum: Bear 0 % (J. 1–5) · Base = min(CAGR, "
