@@ -24,7 +24,7 @@ DCF_CFG = {"dcf": {
     "bull_growth_multiplier": 1.3,
     "bull_growth_cap": 0.10,
     "fade_to_growth": 0.025,
-    "buy_score_min": 70,
+    "buy_quality_min": 60,
     "buy_margin_of_safety_min": 0.30,
     "buy_bear_floor": 0.80,
 }}

@@ -25,7 +25,7 @@ DCF_CFG = {"dcf": {
     "bull_growth_multiplier": 1.3,
     "bull_growth_cap": 0.10,
     "fade_to_growth": 0.025,
-    "buy_score_min": 70,
+    "buy_quality_min": 60,
     "buy_margin_of_safety_min": 0.30,
     "buy_bear_floor": 0.80,
 }}
@@ -104,15 +104,18 @@ def test_dcf_nan_ohne_marktkap():
 
 
 def test_is_buy_candidate_regeln():
+    """v21: Kandidatenregel = Quality >= 60 (statt Score >= 70) + MoS + Bear."""
     res = compute_dcf(_ticker(), DCF_CFG)   # MoS Base = 36,3 %
     price = 100.0
-    # Score 75, MoS 36 %, Bear-Wert?
+    # Quality 75, MoS 36 %, Bear-Wert?
     bear_vps = res.scenarios["bear"].value_per_share
     # Bear >= 80 % des Kurses?
     bear_ok = bear_vps >= 0.80 * price
     assert is_buy_candidate(75.0, res, price, DCF_CFG) == bear_ok
-    # Score zu niedrig -> nie Kaufkandidat
-    assert not is_buy_candidate(69.0, res, price, DCF_CFG)
+    # Quality zu niedrig (59 < 60) -> nie Kaufkandidat, auch bei hohem Score
+    assert not is_buy_candidate(59.0, res, price, DCF_CFG)
+    # Quality genau an der Schwelle (60) -> erlaubt (andere Bedingungen entscheiden)
+    assert is_buy_candidate(60.0, res, price, DCF_CFG) == bear_ok
     # NaN-Werte -> False
     assert not is_buy_candidate(float("nan"), res, price, DCF_CFG)
     assert not is_buy_candidate(75.0, res, float("nan"), DCF_CFG)

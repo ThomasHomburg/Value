@@ -56,11 +56,12 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     if (m.market_cap is not None and not m.market_cap.is_na()
             and dcf.shares == dcf.shares and dcf.shares > 0):
         price = m.market_cap.value / dcf.shares
-    dcf.is_buy = is_buy_candidate(result["total"], dcf, price, cfg)
+    # v21: Kandidatenregel auf Quality (statt Gesamtscore) umgestellt
+    dcf.is_buy = is_buy_candidate(result["quality"], dcf, price, cfg)
 
     # MoS je Szenario + Kandidaten-Begruendung (welche Bedingung fehlt)
     dc = cfg["dcf"]
-    score_min = float(dc.get("buy_score_min", 70))
+    quality_min = float(dc.get("buy_quality_min", 60))
     mos_min = float(dc.get("buy_margin_of_safety_min", 0.30))
     bear_floor = float(dc.get("buy_bear_floor", 0.80))
     mos_bear = float("nan")
@@ -75,9 +76,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 and bull_vps.value_per_share > 0:
             mos_bull = 1.0 - price / bull_vps.value_per_share
     missing = []
-    if result["total"] != result["total"] or result["total"] < score_min:
-        missing.append(f"Score {result['total']:.1f} < {score_min:.0f}"
-                       if result["total"] == result["total"] else "Score n/a")
+    if result["quality"] != result["quality"] or result["quality"] < quality_min:
+        missing.append(f"Quality {result['quality']:.1f} < {quality_min:.0f}"
+                       if result["quality"] == result["quality"] else "Quality n/a")
     if dcf.margin_of_safety != dcf.margin_of_safety or dcf.margin_of_safety < mos_min:
         missing.append(f"MoS Base {dcf.margin_of_safety:.1%} < {mos_min:.0%}"
                        if dcf.margin_of_safety == dcf.margin_of_safety else "MoS Base n/a")
@@ -119,8 +120,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                        m.ticker)
     if dcf.is_buy:
         flag_parts.append("kauf")
-        logger.info("%s: Kaufkandidat (Score %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
-                    m.ticker, result["total"], dcf.margin_of_safety * 100)
+        logger.info("%s: Kaufkandidat (Quality %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
+                    m.ticker, result["quality"], dcf.margin_of_safety * 100)
     flags = " ".join(dict.fromkeys(flag_parts))  # entdoppeln, Reihenfolge behalten
     row = {
         "ticker": m.ticker,

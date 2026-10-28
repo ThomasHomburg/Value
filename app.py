@@ -198,8 +198,8 @@ def page_ranking() -> None:
         "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario)"),
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
-        "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Score ≥ 70, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
-        "Flags": st.column_config.TextColumn("Flags", help="blk:duenn = Block mit >30 % fehlenden Daten · duenn = Kriterium mit < 5 Jahren Daten · kl.Kapital = ROIC > 100 % (kleine/negative Kapitalbasis) · kauf = Kaufkandidat (Score ≥ 70, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs)"),
+        "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
+        "Flags": st.column_config.TextColumn("Flags", help="blk:duenn = Block mit >30 % fehlenden Daten · duenn = Kriterium mit < 5 Jahren Daten · kl.Kapital = ROIC > 100 % (kleine/negative Kapitalbasis) · kauf = Kaufkandidat (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs)"),
     }
     st.dataframe(styler, width="stretch", hide_index=True, column_config=col_cfg)
     st.caption("Klick auf eine Spaltenueberschrift sortiert die Tabelle; Maus über die "
@@ -856,34 +856,28 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
 
     # --- Sensitivitaetstabelle: MoS (Base) ueber Diskontsatz x Terminal Growth ---
     st.markdown("**Sensitivität: MoS (Base) je Aktie**")
-    sens = sensitivity_mos_base(m, CFG)
-    if sens:
-        rates = sorted({s["discount_rate"] for s in sens})
-        gs = sorted({s["terminal_growth"] for s in sens})
-        grid = {(s["discount_rate"], s["terminal_growth"]): s for s in sens}
-        sens_rows = []
-        for rr in rates:
-            row_s = {"Diskontsatz \\ Terminal Growth": f"{rr:.0%}"}
-            for gg in gs:
-                s = grid.get((rr, gg))
-                if s is None or s["mos"] != s["mos"]:
-                    row_s[f"g = {gg:.1%}"] = "n/a"
-                else:
-                    row_s[f"g = {gg:.1%}"] = f"{s['mos']:.1%}"
-            sens_rows.append(row_s)
-        st.dataframe(pd.DataFrame(sens_rows), width="stretch", hide_index=True)
-        vps_rows = []
-        for rr in rates:
-            row_v = {"Diskontsatz \\ Terminal Growth": f"{rr:.0%}"}
-            for gg in gs:
-                s = grid.get((rr, gg))
-                if s is None or s["value_per_share"] != s["value_per_share"]:
-                    row_v[f"g = {gg:.1%}"] = "n/a"
-                else:
-                    row_v[f"g = {gg:.1%}"] = f"{s['value_per_share']:,.2f} {cur}"
-            vps_rows.append(row_v)
+    sens = sensitivity_mos_base(m, CFG, current_price=price)
+    if sens and not sens["mos"].empty:
+        mos_df = sens["mos"].copy()
+        vps_df = sens["vps"].copy()
+        mos_df["label"] = mos_df["discount_rate"].map(lambda r: f"{r:.0%}") + " \\ " + \
+            mos_df["terminal_growth"].map(lambda g: f"g = {g:.1%}")
+        mos_pivot = mos_df.pivot(index="discount_rate", columns="terminal_growth", values="mos")
+        mos_pivot = mos_pivot.sort_index().sort_index(axis=1)
+        mos_pivot.index = [f"{r:.0%}" for r in mos_pivot.index]
+        mos_pivot.columns = [f"g = {g:.1%}" for g in mos_pivot.columns]
+        mos_pivot = mos_pivot.map(lambda v: "n/a" if v != v else f"{v:.1%}")
+        mos_pivot.index.name = "Diskontsatz \\ Terminal Growth"
+        st.dataframe(mos_pivot.reset_index(), width="stretch", hide_index=True)
+        vps_pivot = vps_df.pivot(index="discount_rate", columns="terminal_growth",
+                                 values="value_per_share")
+        vps_pivot = vps_pivot.sort_index().sort_index(axis=1)
+        vps_pivot.index = [f"{r:.0%}" for r in vps_pivot.index]
+        vps_pivot.columns = [f"g = {g:.1%}" for g in vps_pivot.columns]
+        vps_pivot = vps_pivot.map(lambda v: "n/a" if v != v else f"{v:,.2f} {cur}")
+        vps_pivot.index.name = "Diskontsatz \\ Terminal Growth"
         st.markdown("**Innerer Wert je Aktie** (Base-Pfad) je Kombination")
-        st.dataframe(pd.DataFrame(vps_rows), width="stretch", hide_index=True)
+        st.dataframe(vps_pivot.reset_index(), width="stretch", hide_index=True)
         st.caption(f"Innerer Wert je Aktie (Base-Pfad) ueber Diskontsatz × Terminal Growth; "
                    f"Kurs = {'n/a' if price is None else f'{price:,.2f} {cur}'}; "
                    f"MoS (Base) = 1 − Kurs / Wert je Aktie. "
@@ -897,11 +891,11 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
 
     buy = bool(row and row.get("is_buy"))
     if buy:
-        st.success("[KAUF] Kaufkandidat (Score >= 70, MoS Base >= 30 %, Bear >= 80 % des Kurses)")
+        st.success("[KAUF] Kaufkandidat (Quality >= 60, MoS Base >= 30 %, Bear >= 80 % des Kurses)")
     st.caption("Formel: Innerer Wert = SUMME FCF_t/(1+r)^t (t=1..10) + [FCF_10 x (1+g)/(r-g)]/(1+r)^10; "
                "Wert je Aktie = Innerer Wert / verwässerte Aktien; "
                "MoS (Base) = 1 − Kurs / Wert je Aktie (Base). "
-               "Kaufkandidat: Score ≥ 70 UND MoS Base ≥ 30 % UND Bear ≥ 80 % des Kurses "
+               "Kaufkandidat: Quality ≥ 60 UND MoS Base ≥ 30 % UND Bear ≥ 80 % des Kurses "
                "(Schwellen in config.yaml, Block `dcf`).")
 
 

@@ -25,7 +25,7 @@ python3 -m streamlit run app.py
 
 **Scoring:** Quality- und Value-Score getrennt (`score_groups` in config.yaml); Gesamtscore = 0,75×Quality + 0,25×Value. n/a-Kriterien werden ausgeschlossen und die übrigen Gewichte renormalisiert; **Datenabdeckung** zeigt den Anteil bewerteter Gewichte. Alle Scores und Prozentwerte werden in der Anzeige auf 1 Nachkommastelle gerundet (Berechnung ungerundet). Der Value-Score nutzt **FCF-Yield nach SBC** (FCF − Aktienverguetung, Ø3J) 30 %, **MoS (Base)** aus dem DCF 40 % (voll ab 40 %, null bei ≤ 0 %) und **EV/EBIT rel.** 30 %. Quality-Schwellen verschaerft: ROIC voll ab 35 %, Umsatz-CAGR voll ab 15 %, FCF-Marge voll ab 30 %. Marktkapitalisierung mit Stichtag (Abrufdatum, ISO).
 
-**Flags** (entdoppelt): Blöcke mit >30 % fehlenden Daten (`blk:duenn`); ROIC > 100 % → `kl.Kapital` (kleine/negative Kapitalbasis, z. B. Net Cash); Kriterien mit < 5 Jahren Daten → `duenn` (konfigurierbar: `data.thin_years`); **Kaufkandidat → `kauf`** (Score ≥ 70, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs).
+**Flags** (entdoppelt): Blöcke mit >30 % fehlenden Daten (`blk:duenn`); ROIC > 100 % → `kl.Kapital` (kleine/negative Kapitalbasis, z. B. Net Cash); Kriterien mit < 5 Jahren Daten → `duenn` (konfigurierbar: `data.thin_years`); **Kaufkandidat → `kauf`** (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs).
 
 ## CLI (ohne Browser)
 
@@ -70,7 +70,7 @@ Historienfenster: 5 Jahre (`data.years`). Kriterien mit weniger Jahren → Flag 
 
 ## DCF (Build-Schritt 6)
 
-Innerer Wert je Aktie = SUMME FCF_t/(1+r)^t (t=1..10) + [FCF_10 x (1+g)/(r-g)]/(1+r)^10, dividiert durch verwässerte Aktien. Basis: **normalisierter FCF nach SBC** (Ø letzte 3 Jahre). Wachstum: Bear 0 %, Base = min(Umsatz-CAGR, 6 %), Bull = min(CAGR×1,3, 10 %); Jahre 6–10 linear auf 2,5 %. **MoS (Base)** = 1 − Kurs / Wert je Aktie (Base) → Spalte in der Rangliste. **Kaufkandidat** (Flag `kauf`): Score ≥ 70 UND MoS Base ≥ 30 % UND Bear-Szenario ≥ 80 % des Kurses. Alle Parameter in `config.yaml` (Block `dcf`).
+Innerer Wert je Aktie = SUMME FCF_t/(1+r)^t (t=1..10) + [FCF_10 x (1+g)/(r-g)]/(1+r)^10, dividiert durch verwässerte Aktien. Basis: **normalisierter FCF nach SBC** (Ø letzte 3 Jahre). Wachstum: Bear 0 %, Base = min(Umsatz-CAGR, 6 %), Bull = min(CAGR×1,3, 10 %); Jahre 6–10 linear auf 2,5 %. **MoS (Base)** = 1 − Kurs / Wert je Aktie (Base) → Spalte in der Rangliste. **Kaufkandidat** (Flag `kauf`): Quality ≥ 60 UND MoS Base ≥ 30 % UND Bear-Szenario ≥ 80 % des Kurses. Alle Parameter in `config.yaml` (Block `dcf`).
 
 ## Einheiten-Konvention (wichtig)
 
@@ -92,7 +92,7 @@ Umsatz = 391035000000 USD). Alle Kennzahlen bleiben absolut; Schwellen in
 - [x] Matrix-Seite (Quality vs. Value, Ziel-Quadrant)
 - [x] Formel-Anzeige ROIC 5J / FCF-Yield / ND/EBITDA mit Rohwerten (inkl. Referenz UBER/NVDA/KO)
 - [x] FCF-Yield nach SBC (FCF − Aktienverguetung) als Value-Kriterium
-- [x] 6. DCF-Modul mit 3 Szenarien (Bear/Base/Bull), normalisierter FCF nach SBC (Ø 3 J.), MoS Base in der Rangliste, Kaufkandidaten (Score ≥ 70, MoS ≥ 30 %, Bear ≥ 80 % Kurs)
+- [x] 6. DCF-Modul mit 3 Szenarien (Bear/Base/Bull), normalisierter FCF nach SBC (Ø 3 J.), MoS Base in der Rangliste, Kaufkandidaten (Quality ≥ 60, MoS ≥ 30 %, Bear ≥ 80 % Kurs)
 - [ ] 7. Sektor-Sonderregeln
 - [ ] 8. Universum erweitern, Batch-Lauf
 

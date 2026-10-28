@@ -77,6 +77,30 @@ def _pv(fcf: float, rate: float, year: int) -> float:
     return fcf / (1.0 + rate) ** year
 
 
+def _dcf_scenario(name: str, g5: float, g_terminal: float, rate: float,
+                  fcf_start: float, shares: float, dcfg: dict) -> DcfScenario:
+    """Ein DCF-Szenario: Wachstumspfad, FCFs, Barwerte, Wert je Aktie.
+
+    Wird von compute_dcf (3 Szenarien) und sensitivity_mos_base (Base-Pfad
+    je r/g-Kombination) verwendet -- keine duplizierte Logik.
+    """
+    nan = float("nan")
+    rates = _growth_path(g5, g_terminal, dcfg)
+    fcfs, fcf_t = [], fcf_start
+    for g in rates:
+        fcf_t = fcf_t * (1.0 + g)
+        fcfs.append(fcf_t)
+    pv_fcfs = sum(_pv(f, rate, i + 1) for i, f in enumerate(fcfs))
+    tv = fcfs[-1] * (1.0 + g_terminal) / (rate - g_terminal) if rate > g_terminal else nan
+    tv_pv = _pv(tv, rate, 10) if tv == tv else nan
+    ev = pv_fcfs + tv_pv if tv_pv == tv_pv else nan
+    vps = ev / shares if (ev == ev and shares == shares) else nan
+    return DcfScenario(
+        name=name, growth_rates=rates, fcfs=fcfs, pv_fcfs=pv_fcfs,
+        terminal_value=tv_pv, enterprise_value=ev, value_per_share=vps,
+    )
+
+
 def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
     """Berechnet den DCF fuer einen Ticker nach Config-Block `cfg['dcf']`.
 
@@ -197,21 +221,9 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
     result.fcf_normalized_conv = fcf_conv
 
     for name, g5 in (("bear", g_bear), ("base", g_base), ("bull", g_bull)):
-        rates = _growth_path(g5, g_terminal, dcfg)
-        fcfs, fcf_t = [], fcf_conv
-        for g in rates:
-            fcf_t = fcf_t * (1.0 + g)
-            fcfs.append(fcf_t)
-        r = result.discount_rate
-        pv_fcfs = sum(_pv(f, r, i + 1) for i, f in enumerate(fcfs))
-        tv = fcfs[-1] * (1.0 + g_terminal) / (r - g_terminal) if r > g_terminal else nan
-        tv_pv = _pv(tv, r, 10) if tv == tv else nan
-        ev = pv_fcfs + tv_pv if tv_pv == tv_pv else nan
-        vps = ev / result.shares if (ev == ev and result.shares == result.shares) else nan
-        result.scenarios[name] = DcfScenario(
-            name=name, growth_rates=rates, fcfs=fcfs, pv_fcfs=pv_fcfs,
-            terminal_value=tv_pv, enterprise_value=ev, value_per_share=vps,
-        )
+        sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
+                           result.shares, dcfg)
+        result.scenarios[name] = sc
 
     # --- Margin of Safety (Base) ----------------------------------------------
     base = result.scenarios.get("base")
@@ -222,27 +234,45 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
     return result
 
 
-def sensitivity_mos_base(m: TickerMetrics, cfg: dict, fx=None,
+def sensitivity_mos_base(m: TickerMetrics, cfg: dict, current_price: float | None = None,
+                         fx=None,
                          discount_rates=(0.08, 0.09, 0.10, 0.11),
-                         terminal_growths=(0.02, 0.025, 0.03)) -> list[dict]:
-    """Sensitivitaet: MoS (Base) je Aktie fuer Diskontsatz x Terminal Growth.
+                         terminal_growths=(0.02, 0.025, 0.03)) -> dict:
+    """Sensitivitaet des Base-Szenarios: MoS und innerer Wert je Aktie.
 
-    Pro Kombination (r, g) wird der Base-Szenario-Pfad (Wachstum aus der
-    CAGR, wie in compute_dcf) mit dem jeweiligen r/g neu diskontiert.
-    Rueckgabe: [{discount_rate, terminal_growth, value_per_share, mos}].
+    Eingabe: TickerMetrics, cfg, Kurs (current_price; Default: Kurs aus
+    Marktkapitalisierung / Aktien wie in compute_dcf), optional fx.
+
+    Pro Kombination (r, g) aus discount_rates x terminal_growths wird der
+    Base-Szenario-Pfad (Wachstum aus der CAGR, identische Logik wie
+    compute_dcf via _dcf_scenario) mit r/g neu diskontiert.
+
+    Rueckgabe: {"mos": DataFrame-Rows, "vps": DataFrame-Rows} mit je einer
+    Zeile pro (r, g): {discount_rate, terminal_growth, value_per_share, mos}.
+    Zwei Tabellen: MoS = 1 - Kurs / Wert je Aktie, und Wert je Aktie.
     """
+    import pandas as pd
+
     dcfg = cfg["dcf"]
     nan = float("nan")
     base_res = compute_dcf(m, cfg, fx=fx)
     if base_res.fcf_normalized != base_res.fcf_normalized:
-        return []
+        return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
     mcap = m.market_cap
     if mcap is None or mcap.is_na() or mcap.value <= 0:
-        return []
+        return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
     if base_res.shares != base_res.shares or base_res.shares <= 0:
-        return []
+        return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
 
-    # FCF in Marktkap.-Waehrung (wie in compute_dcf: TTM-Waehrung falls TTM-Basis)
+    # Kurs: Parameter, sonst aus Marktkap./Aktien (wie compute_dcf)
+    if current_price is not None and current_price == current_price and current_price > 0:
+        price = float(current_price)
+    else:
+        price = mcap.value / base_res.shares
+    if price != price or price <= 0:
+        return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
+
+    # Start-FCF in Marktkap.-Waehrung (identisch zu compute_dcf)
     converter = fx
     if converter is None:
         from data.metrics import _NoFX
@@ -257,44 +287,45 @@ def sensitivity_mos_base(m: TickerMetrics, cfg: dict, fx=None,
     fcf_conv = converter.convert(base_res.fcf_normalized, fcf_cur,
                                  mcap.currency, latest_fy)
     if math.isnan(fcf_conv):
-        return []
+        return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
 
-    price = mcap.value / base_res.shares
+    # Base-Wachstum (min(CAGR, base_growth_cap)); identisch zu compute_dcf
     cagr = base_res.revenue_cagr
     base_cap = float(dcfg.get("base_growth_cap", 0.06))
     g5 = 0.0 if cagr != cagr else min(cagr, base_cap)
-    rates = _growth_path(g5, float(dcfg.get("fade_to_growth", 0.025)), dcfg)
-    fcfs, fcf_t = [], fcf_conv
-    for g in rates:
-        fcf_t = fcf_t * (1.0 + g)
-        fcfs.append(fcf_t)
 
-    out = []
+    mos_rows, vps_rows = [], []
     for r in discount_rates:
         for g in terminal_growths:
             if r <= g:
-                out.append({"discount_rate": r, "terminal_growth": g,
-                            "value_per_share": nan, "mos": nan})
+                mos_rows.append({"discount_rate": r, "terminal_growth": g,
+                                 "value_per_share": nan, "mos": nan})
+                vps_rows.append({"discount_rate": r, "terminal_growth": g,
+                                 "value_per_share": nan})
                 continue
-            pv_fcfs = sum(_pv(f, r, i + 1) for i, f in enumerate(fcfs))
-            tv = fcfs[-1] * (1.0 + g) / (r - g)
-            ev = pv_fcfs + _pv(tv, r, 10)
-            vps = ev / base_res.shares
-            mos = 1.0 - price / vps if vps > 0 else nan
-            out.append({"discount_rate": r, "terminal_growth": g,
-                        "value_per_share": vps, "mos": mos})
-    return out
+            sc = _dcf_scenario("base", g5, g, r, fcf_conv, base_res.shares, dcfg)
+            vps = sc.value_per_share
+            mos = 1.0 - price / vps if (vps == vps and vps > 0) else nan
+            mos_rows.append({"discount_rate": r, "terminal_growth": g,
+                             "value_per_share": vps, "mos": mos})
+            vps_rows.append({"discount_rate": r, "terminal_growth": g,
+                             "value_per_share": vps})
+    return {"mos": pd.DataFrame(mos_rows), "vps": pd.DataFrame(vps_rows)}
 
 
-def is_buy_candidate(score: float, dcf: DcfResult, current_price: float, cfg: dict) -> bool:
-    """Kaufkandidat (CLAUDE.md): Score >= buy_score_min UND MoS (Base) >=
-    buy_margin_of_safety_min UND Bear-Szenario >= Kurs x buy_bear_floor."""
+def is_buy_candidate(quality: float, dcf: DcfResult, current_price: float, cfg: dict) -> bool:
+    """Kaufkandidat: Quality >= buy_quality_min UND MoS (Base) >=
+    buy_margin_of_safety_min UND Bear-Szenario >= Kurs x buy_bear_floor.
+
+    Alle Schwellen aus config.yaml (Block `dcf`). Quality statt Gesamtscore
+    (v21): die Bewertungsbedingungen (MoS, Bear) tragen den Value-Anteil.
+    """
     dcfg = cfg["dcf"]
-    if score != score or dcf.margin_of_safety != dcf.margin_of_safety:
+    if quality != quality or dcf.margin_of_safety != dcf.margin_of_safety:
         return False
     if current_price != current_price or current_price <= 0:
         return False
-    if score < float(dcfg.get("buy_score_min", 70)):
+    if quality < float(dcfg.get("buy_quality_min", 60)):
         return False
     if dcf.margin_of_safety < float(dcfg.get("buy_margin_of_safety_min", 0.30)):
         return False

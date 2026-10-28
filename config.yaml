@@ -162,6 +162,6 @@ dcf:
   bull_growth_cap: 0.10
   fade_to_growth: 0.025
   fcf_avg_years: 3
-  buy_score_min: 70
+  buy_quality_min: 60         # Kaufkandidat: Quality-Score >= 60 (statt Gesamtscore)
   buy_margin_of_safety_min: 0.30
   buy_bear_floor: 0.80

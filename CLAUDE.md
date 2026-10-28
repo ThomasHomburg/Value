@@ -64,7 +64,7 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - Wachstum Jahre 6-10: linear abnehmend auf 2,5 %
 - Terminal Growth: 2,5 %; Diskontsatz: 9 % (Config, bei Zyklikern 10 %)
 - Ausgabe: innerer Wert je Aktie je Szenario, Margin of Safety = 1 - Kurs / innerer Wert (Base)
-- **Kaufkandidat**: Gesamtscore >= 70 UND Margin of Safety (Base) >= 30 % UND Bear-Szenario >= Kurs x 0,8
+- **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety (Base) >= 30 % UND Bear-Szenario >= Kurs x 0,8
 
 ## UI (Streamlit)
 - **Seite 1 Rangliste**: sortierbare Tabelle (Ticker, Name, Sektor, Score, FCF-Yield, Margin of Safety, Flags), Filter nach Sektor/Land/Score
