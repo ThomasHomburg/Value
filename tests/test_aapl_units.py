@@ -82,10 +82,19 @@ def test_aapl_fcf_yield_sbc_plausible(aapl_metrics):
 
 
 def test_aapl_fcf_yield_sbc_nan_when_sbc_missing(aapl_metrics):
-    """Fehlende SBC -> fcf_sbc = NaN -> FCF-Yield SBC = NaN, nie 0."""
+    """v34: Fehlende SBC in allen Jahren -> fcf_sbc = NaN -> FCF-Yield SBC = NaN
+    (nie 0, nie Roh-FCF); Pipeline setzt Status 'Pruefen (SBC fehlt)' (nie Kandidat)."""
+    from config import load_config
+    from scoring.pipeline import evaluate_ticker
     for fy in aapl_metrics.years:
         aapl_metrics.years[fy]["fcf_sbc"].value = float("nan")
     assert math.isnan(fcf_yield_sbc(aapl_metrics, 2024))
+    cfg = load_config()
+    cfg["sec"] = {"enabled": False}
+    out = evaluate_ticker(aapl_metrics, cfg)
+    assert out["row"]["status"] == "Prüfen (SBC fehlt)"
+    assert out["row"]["is_buy"] is False
+    assert "SBC n/a (ohne SBC)" in out["row"]["flags"]
 
 
 def test_aapl_criterion_fcf_yield_sbc_avg3(aapl_metrics, cfg):

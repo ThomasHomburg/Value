@@ -23,6 +23,11 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v34: SBC-Regel mit Prüfstatus, Kandidaten-Labels, MoS „< −100 %“
+- **SBC fehlt in allen Jahren** → FCF-Yield und DCF **ohne SBC-Abzug** (Roh-FCF-Fallback), Flag **`SBC n/a (ohne SBC)`** **und Status „Prüfen (SBC fehlt)“** — der nie „Kandidat“ wird (`is_buy=False`). Der Roh-FCF-Yield fließt **nicht** in den Value-Score (`fcf_yield_sbc_avg3` bleibt n/a). Live: CAT, XOM, JPM, TRV, CSX, WFC, AIG, MET, DUK, DOW.
+- **Kandidaten-Labels**: „**Kandidat (streng)**“ = alle Modi, „**Kandidat (aktuell)**“ = nur jüngste 2 (Spalten „Status (alle Modi)“ / „Status (jüngste 2)“; aktive Regel je `dcf.candidate_mode`).
+- **MoS < −100 %** wird als „**< −100 %**“ angezeigt (`_fmt_mos`).
+
 ## v33: SBC-Fallback, Value-n/a bei Coverage < 70 %, MoS „Start-FCF ≤ 0“, Quality-Rang ganzzahlig
 - **SBC fehlt** → FCF und DCF **ohne SBC** (Fallback auf Roh-FCF in `_avg_fcf_start`/`_ttm_fcf_start`/`_ttm_only_fcf_start`) mit Flag **`SBC n/a (ohne SBC)`** (`DcfResult.sbc_missing`). Live: CAT, XOM, JPM, TRV, WFC, AIG, MET, CSX, DUK, DOW.
 - **Value = „n/a“** bei Datenabdeckung < `score_groups.min_coverage_value` (70 %) — `scoring/score.py` setzt `value=NaN`, Rangliste zeigt „n/a“. Live: JPM (30 %), MS/GS (40 %), WFC/EQIX (50 %), BAC/AIG/TRV/MET/DUK/DOW (60 %).

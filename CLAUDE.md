@@ -71,6 +71,9 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - **SEC-EDGAR-Abgleich** (`data/sec.py`, US-Ticker): OCF/Capex/SBC je Jahr gegen data.sec.gov/api/xbrl/companyfacts; Abweichung > `sec.tolerance` (5 %) -> Flag `sec:abweichend`. User-Agent MIT E-Mail (Config `sec.user_agent`, Platzhalter)
 - **ROIC/NOPAT**: Steuersatz = Steuer/Vorsteuergewinn, begrenzt 0-35 % (`data.tax_rate_min/max`);
   ausserhalb/Vorsteuerverlust -> Normsteuersatz 21 % (`data.tax_rate_norm`); EBIT <= 0 -> NOPAT = EBIT
+- **v34 SBC-Regel**: `sbc_missing_all` = kein `fcf_sbc` in ALLEN Jahren UND kein TTM-fcf_sbc -> Status `Prüfen (SBC fehlt)` (alle drei Status-Spalten), `is_buy=False` (nie Kandidat), Flag `SBC n/a (ohne SBC)`; Row `status_pruefen_sbc`. DCF/FCF laufen trotzdem (Roh-FCF-Fallback v33), aber `fcf_yield_sbc_avg3` bleibt n/a (Roh-FCF-Yield fliesst NICHT in Value-Score).
+- **v34 Kandidaten-Labels**: app.py "Status (alle Modi)" -> `Kandidat (streng)`, "Status (juengste 2)" -> `Kandidat (aktuell)`; aktive Spalte je `dcf.candidate_mode`.
+- **v34 MoS < -100 %**: app.py `_fmt_mos` -> `"< −100 %"`.
 - **v33 SBC-Fallback**: `valuation/dcf.py` `_avg_fcf_start`/`_ttm_fcf_start`/`_ttm_only_fcf_start` fallbacken auf Roh-FCF (`fcf`), wenn `fcf_sbc` fehlt; `DcfResult.sbc_missing=True` -> Pipeline-Flag `SBC n/a (ohne SBC)` + Row `dcf_sbc_missing`.
 - **v33 Value-n/a**: `scoring/score.py::score_ticker` setzt `value=NaN`, wenn `coverage < score_groups.min_coverage_value` (0.70); app.py Value-Spalte (TextColumn) zeigt "n/a"; Row traegt `value_na_below_coverage`.
 - **v33 Start-FCF <= 0**: `DcfResult.fcf_le0`; app.py `_fmt_mos` + Modus-Tabelle + ND-Tabelle zeigen "Start-FCF ≤ 0" statt n/a; Row `dcf_fcf_le0`.

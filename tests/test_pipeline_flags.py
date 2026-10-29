@@ -70,13 +70,27 @@ def test_na_criteria_excluded_and_renormalized(aapl_metrics):
 
 
 def test_sbc_yield_is_na_when_sbc_missing(aapl_metrics):
-    """Ohne SBC in den Rohdaten -> fcf_yield_sbc_avg3 n/a (nie Roh-FCF-Yield)."""
+    """v34: Ohne SBC in ALLEN Jahren -> fcf_yield_sbc_avg3 n/a (Roh-FCF-Yield fliesst
+    NICHT in den Value-Score), aber Status 'Pruefen (SBC fehlt)' gesetzt (nie Kandidat)."""
     from scoring.criteria import compute_criteria
+    from scoring.pipeline import evaluate_ticker
     cfg = load_config()
+    cfg["sec"] = {"enabled": False}
     for fy in aapl_metrics.years:
         aapl_metrics.years[fy]["fcf_sbc"].value = float("nan")
     crits = compute_criteria(aapl_metrics, cfg)
+    # Roh-FCF-Yield fliesst nicht in den Value-Score ein:
     assert crits["fcf_yield_sbc_avg3"].is_na
+    # ... aber der Pruefstatus wird gesetzt:
+    out = evaluate_ticker(aapl_metrics, cfg)
+    row = out["row"]
+    assert row is not None
+    assert "SBC n/a (ohne SBC)" in row["flags"]
+    assert row["status"] == "Prüfen (SBC fehlt)"
+    assert row["status_all"] == "Prüfen (SBC fehlt)"
+    assert row["status_recent2"] == "Prüfen (SBC fehlt)"
+    assert row["status_pruefen_sbc"] is True
+    assert row["is_buy"] is False  # nie Kandidat
 
 
 def test_row_has_both_yield_columns(aapl_metrics):

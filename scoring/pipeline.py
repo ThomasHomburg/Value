@@ -159,6 +159,18 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                                         f"aber min {mos_rule_val:.1%} < {mos_min:.0%}")
         return "nein", ""
 
+    # v34: SBC-Zeile fehlt in ALLEN Jahren -> Status "Pruefen (SBC fehlt)" (nie Kandidat);
+    # FCF/DCF laufen ohne SBC (Fallback v33), Roh-FCF-Yield fliesst NICHT in den Value-Score
+    sbc_missing_all = not any(
+        "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()
+        for fy in m.years
+    ) and not (
+        getattr(m, "ttm", None) is not None
+        and m.ttm.ttm.get("fcf_sbc") is not None and not m.ttm.ttm["fcf_sbc"].is_na()
+    )
+    if sbc_missing_all:
+        dcf.is_buy = False  # nie Kandidat ohne SBC
+
     mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
     mos_vals_global = mos_vals
     quality_ok = result["quality"] == result["quality"] and result["quality"] >= quality_min
@@ -176,11 +188,22 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
         status_all, status_all_detail = _status_for(mos_rule, mos_vals, dcf.is_buy)
         status_recent2, status_recent2_detail = status, status_detail
+        if sbc_missing_all:
+            status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
+            status_detail = status_all_detail = status_recent2_detail = (
+                "SBC fehlt in allen Jahren -> FCF/DCF ohne SBC; nie Kandidat")
     else:
         # Default min_all: aktive Regel = alle Modi
         status_all, status_all_detail = status, status_detail
-        is_buy_recent2 = is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2)
+        is_buy_recent2 = (False if sbc_missing_all else
+                          is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
         status_recent2, status_recent2_detail = _status_for(mos_recent2, recent2, is_buy_recent2)
+
+    # v34: SBC fehlt -> alle Status "Pruefen (SBC fehlt)" (ueberschreibt Kandidat/Beobachtung)
+    if sbc_missing_all:
+        status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
+        status_detail = status_all_detail = status_recent2_detail = (
+            "SBC fehlt in allen Jahren -> FCF/DCF ohne SBC; nie Kandidat")
 
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
@@ -332,6 +355,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "history_years": count_value_years(m),
         # v33: SBC-Fallback (DCF ohne SBC) + Start-FCF <= 0 + Value-n/a-Schwelle
         "dcf_sbc_missing": bool(dcf.sbc_missing),
+        "status_pruefen_sbc": sbc_missing_all,
         "dcf_fcf_le0": bool(dcf.fcf_le0),
         "value_na_below_coverage": float(cfg.get("score_groups", {}).get("min_coverage_value", 0.70)),
     }

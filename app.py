@@ -87,6 +87,9 @@ def _fmt_mos(v: float, le0: bool = False) -> str:
     # v33: Start-FCF <= 0 -> "Start-FCF <= 0" statt n/a
     if le0:
         return "Start-FCF ≤ 0"
+    # v34: MoS unter -100 % -> "< -100 %"
+    if v == v and v < -1.0:
+        return "< −100 %"
     return "n/a" if (v != v) else f"{v:.1%}"
 
 
@@ -154,8 +157,17 @@ def page_ranking() -> None:
     view["Status"] = view["status"].map(lambda v: str(v))
     # v30: Status unter beiden Kandidatenregeln nebeneinander
     # (candidate_mode aus config.yaml bestimmt die aktive Regel = Spalte "Status")
-    view["Status (alle Modi)"] = view["status_all"].map(lambda v: str(v))
-    view["Status (jüngste 2)"] = view["status_recent2"].map(lambda v: str(v))
+    # v34: Kandidaten-Labels -- "Kandidat (streng)" = alle Modi, "Kandidat (aktuell)" = juengste 2
+    view["Status (alle Modi)"] = view["status_all"].map(
+        lambda v: "Kandidat (streng)" if v == "Kandidat" else str(v))
+    view["Status (jüngste 2)"] = view["status_recent2"].map(
+        lambda v: "Kandidat (aktuell)" if v == "Kandidat" else str(v))
+    # aktive Regel (candidate_mode) mit passendem Label
+    _active_label = ("Kandidat (aktuell)"
+                     if CFG["dcf"].get("candidate_mode", "min_all") == "min_recent2"
+                     else "Kandidat (streng)")
+    view["Status"] = view["status"].map(
+        lambda v: _active_label if v == "Kandidat" else str(v))
     # v28: SEC-EDGAR-Abgleich in der Rangliste sichtbar (US-Ticker)
     def _sec_col(r):
         if r["sec_check_flag"]:
@@ -191,7 +203,8 @@ def page_ranking() -> None:
                  "MoS Bear", "MoS Bull", "Status", "Status (alle Modi)", "Status (jüngste 2)",
                  "Kandidat", "SEC", "Flags"]
     # v27: Standard-Sortierung: Kandidat zuerst, dann Beobachtung, dann MoS (Base) absteigend
-    view["_kauf"] = (view["Status"] == "Kandidat").astype(int)
+    # v34: beide Kandidaten-Labels zaehlen als Kandidat (streng/aktuell)
+    view["_kauf"] = view["status"].isin(["Kandidat"]).astype(int)
     view["_watch"] = (view["Status"] == "Beobachtung").astype(int)
     view["_mos"] = pd.to_numeric(view["MoS (Base)"].str.replace("n/a", "").str.rstrip("%"), errors="coerce")
     view = view.sort_values(["_kauf", "_watch", "_mos"], ascending=[False, False, False])
@@ -1108,6 +1121,7 @@ def page_matrix() -> None:
             return "Kandidat"
         if r.get("status") == "Beobachtung":
             return "Beobachtung"
+        # v34: "Pruefen (SBC fehlt)" und alles andere -> grau
         return "nein"
     df["status_cat"] = df.apply(_status_color, axis=1)
     color_scale = alt.Scale(domain=["Kandidat", "Beobachtung", "nein"],
