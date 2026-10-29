@@ -59,10 +59,11 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - Sektor ueber FMP-Feld `sector` bestimmen; Config-Block je Sektor in `config.yaml`
 
 ## Innerer Wert (DCF, 3 Szenarien)
-- Basis: normalisierter FCF = O der letzten 3 Jahre
+- Basis: normalisierter FCF nach SBC = O der letzten 3 Jahre (umschaltbar: jungstes GJ / TTM; Config `dcf.fcf_mode`, TTM = O TTM + 2 nicht uberlappende GJ)
 - Wachstum Jahre 1-5: Bear 0 %, Base = min(Umsatz-CAGR 5 J., 6 %), Bull = min(CAGR x 1,3; 10 %)
 - Wachstum Jahre 6-10: linear abnehmend auf 2,5 %
 - Terminal Growth: 2,5 %; Diskontsatz: 9 % (Config, bei Zyklikern 10 %)
+- Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert TV) - Nettoverschuldung OHNE Kundengelder (Kundengelder z. B. PYPL Deposit Liabilities sitzen in Cash -> werden hinzuaddiert)
 - Ausgabe: innerer Wert je Aktie je Szenario, Margin of Safety = 1 - Kurs / innerer Wert (Base)
 - **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety (Base) >= 30 % UND Bear-Szenario >= Kurs x 0,8
 

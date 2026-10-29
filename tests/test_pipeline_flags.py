@@ -138,6 +138,31 @@ def test_row_has_mos_scenarios_and_kandidat(aapl_metrics):
         assert "nein:" in row["kandidat"]
 
 
+def test_kandidat_uses_quality_rule_not_score(aapl_metrics, cfg, monkeypatch):
+    """v22: Kandidatenregel = Quality >= 60 (config buy_quality_min).
+
+    Auch bei Gesamtscore >= 70 darf die Begruendung NICHT 'Score < 70' nennen,
+    sondern muss die Quality-Schwelle referenzieren.
+    """
+    import scoring.pipeline as pl
+
+    orig_score = pl.score_ticker
+
+    def fake_score(criteria, crit_cfg, groups=None):
+        res = orig_score(criteria, crit_cfg, groups)
+        res["quality"] = 55.0   # unter der Schwelle 60
+        return res
+
+    monkeypatch.setattr(pl, "score_ticker", fake_score)
+    res = evaluate_ticker(aapl_metrics, cfg)
+    row = res["row"]
+    assert row["quality"] == 55.0
+    assert row["score"] >= 70          # Gesamtscore hoch, Quality niedrig
+    assert not row["is_buy"]
+    assert "Quality 55.0 < 60" in row["kandidat"]
+    assert "Score" not in row["kandidat"]
+
+
 def test_mos_base_criterion_uses_dcf(aapl_metrics, cfg):
     """mos_base-Kriterium liefert die MoS (Base) aus dem DCF."""
     from scoring.criteria import compute_criteria

@@ -176,6 +176,11 @@ def extract_metrics(
             "shares_diluted": (inc.get("weightedAverageSharesDiluted"), "shares"),
             "equity": (bal.get("totalStockholdersEquity"), "currency"),
             "net_debt": (bal.get("netDebt"), "currency"),
+            "_total_debt": (bal.get("totalDebt"), "currency"),
+            "_cash": (bal.get("cashAndCashEquivalents"), "currency"),
+            "_short_term_investments": (bal.get("shortTermInvestments"), "currency"),
+            "customer_deposits": (bal.get("depositLiabilities")
+                                  or bal.get("customerDeposits"), "currency"),
             "operating_cashflow": (cf.get("operatingCashFlow"), "currency"),
             "capex": (cf.get("capitalExpenditure"), "currency"),
             "stock_based_compensation": (cf.get("stockBasedCompensation"), "currency"),

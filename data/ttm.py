@@ -28,8 +28,8 @@ FLOW_KEYS = (
     "interest_expense", "income_tax_expense", "income_before_tax",
     "operating_cashflow", "capex", "stock_based_compensation", "fcf", "fcf_sbc",
 )
-STOCK_KEYS = ("equity", "net_debt", "_total_debt", "_cash", "_restricted_cash",
-              "customer_deposits")
+STOCK_KEYS = ("equity", "net_debt", "_total_debt", "_cash", "_short_term_investments",
+              "_restricted_cash", "customer_deposits")
 
 TTM_TOLERANCE = 0.02  # 2 % Abweichung zum Jahreswert
 

@@ -493,11 +493,9 @@ def page_scorecard() -> None:
     # --- Referenz-Check: UBER, NVDA, KO (Rohwerte + Formeln) -----------------
     reference_formula_section()
 
-    # --- Rohwerte ADBE & PYPL: FCF, SBC, Marktkapitalisierung -----------------
+    # --- Rohwerte ADBE & PYPL: FCF, SBC, Bilanz, Marktkapitalisierung ---------
     sbc_detail_section()
 
-    # --- Rohwerte PYPL: Cash, Finanzschulden, Nettoverschuldung, OCF, Capex ---
-    pypl_balance_detail_section()
 
 
 def _formula_block(m: TickerMetrics, label: str) -> None:
@@ -607,15 +605,35 @@ def reference_formula_section() -> None:
             _formula_block(m, "Referenz")
 
 
+def _customer_deposit_note(cd, rc, cash) -> str:
+    """Hinweis, ob Kundengelder in 'Cash' enthalten sind (Feld oder Hinweis)."""
+    if cd is not None and not cd.is_na() and cash is not None and not cash.is_na() and cash.value > 0:
+        return f"ja — {cd.value / 1e9:,.2f} Mrd. ({cd.value / cash.value:.0%} von Cash)"
+    if cd is not None and not cd.is_na():
+        return f"ja — {cd.value / 1e9:,.2f} Mrd. (Cash n/a)"
+    if rc is not None and not rc.is_na() and rc.value > 0:
+        return (f"unbekannt (keine Deposit-Liabilities-Zeile); Restricted Cash "
+                f"{rc.value / 1e9:,.2f} Mrd. als Naeherung")
+    if cash is not None and not cash.is_na():
+        return "unbekannt — lt. 10-K sind Kundengelder in Cash enthalten"
+    return "unbekannt (Cash n/a)"
+
+
 def sbc_detail_section() -> None:
     """Expander mit Rohwerten fuer ADBE und PYPL: FCF je Jahr, SBC je Jahr,
-    Marktkapitalisierung mit Waehrung und Stichtag (live via Provider)."""
+    Bilanzdaten je Jahr (Cash, kurzfristige Anlagen, Finanzschulden,
+    Nettoverschuldung + Kundengelder-Hinweis) und Marktkapitalisierung
+    mit Waehrung und Stichtag (live via Provider)."""
     st.divider()
-    st.subheader("Rohwerte: ADBE & PYPL — FCF, SBC, Marktkapitalisierung")
-    st.caption("FCF = Operating Cashflow − |Capex|; SBC = Aktienvergütung (Stock Based "
-               "Compensation) aus dem Cashflow-Statement; FCF nach SBC = FCF − SBC. "
-               "Beträge absolut in Berichtswährung. Marktkapitalisierung mit Stichtag "
-               "(Abrufdatum). Live-Laden via yfinance/FMP.")
+    st.subheader("Rohwerte: ADBE & PYPL — FCF, SBC, Bilanz, Marktkapitalisierung")
+    st.caption("FCF = Operating Cashflow − |Capex|; SBC = Aktienverguetung (Stock Based "
+               "Compensation); FCF nach SBC = FCF − SBC. Bilanz: Cash And Cash Equivalents, "
+               "Short Term Investments (kurzfristige Anlagen), Total Debt (Finanzschulden), "
+               "Net Debt (Nettoverschuldung; gemeldet, sonst Total Debt − Cash). "
+               "Kundengelder = 'Deposit Liabilities' (z. B. PayPal Verwahrkundengelder, in "
+               "Cash enthalten) — das DCF subtrahiert die Nettoverschuldung OHNE "
+               "Kundengelder, addiert sie also hinzu. Betraege absolut in Berichtswährung. "
+               "Marktkapitalisierung mit Stichtag (Abrufdatum). Live-Laden via yfinance/FMP.")
 
     with st.spinner("Lade ADBE, PYPL (yfinance/FMP) …"):
         companies = _load_reference_tickers(("ADBE", "PYPL"))
@@ -633,6 +651,7 @@ def sbc_detail_section() -> None:
                          f"{mc.currency} (Stichtag: {m.market_cap_date or 'n/a'})")
             else:
                 st.write("**Marktkapitalisierung:** n/a")
+            st.markdown("**Cashflow (je Geschaeftsjahr)**")
             rows = []
             for fy in sorted(m.years, reverse=True):
                 y = m.years[fy]
@@ -649,97 +668,41 @@ def sbc_detail_section() -> None:
                     "FCF − SBC": "n/a" if (not fsbc or fsbc.is_na()) else f"{fsbc.value / 1e9:,.2f} Mrd. {cur}",
                 })
             st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-            st.caption("Einheit: Mrd. Berichtswährung; Jahr = Geschäftsjahr (Jahresende). "
-                       "n/a = Daten fehlen (nie mit 0 gefüllt).")
+            st.markdown("**Bilanz (je Geschaeftsjahr, Jahresende)**")
+            brows = []
+            for fy in sorted(m.years, reverse=True):
+                y = m.years[fy]
+                cash = y.get("_cash"); sti = y.get("_short_term_investments")
+                td = y.get("_total_debt"); nd = y.get("net_debt")
+                cd = y.get("customer_deposits"); rc = y.get("_restricted_cash")
 
+                def _b(met) -> str:
+                    return "n/a" if (met is None or met.is_na()) else f"{met.value / 1e9:,.2f}"
 
-def pypl_balance_detail_section() -> None:
-    """Expander: PYPL-Rohwerte der letzten 4 Jahre -- Cash, Finanzschulden,
-    Nettoverschuldung, OCF, Capex; Markierung, ob Kundengelder in 'Cash'
-    enthalten sind (PayPal Verwahrkundengelder; yfinance-Row 'Deposit
-    Liabilities'/'Customer Deposits')."""
-    st.divider()
-    with st.expander("Rohwerte: PYPL — Cash, Finanzschulden, Nettoverschuldung, OCF, Capex (4 Jahre)",
-                     expanded=False):
-        st.caption("Quelle: yfinance (live). Beträge absolut in Mrd. USD. "
-                   "Finanzschulden = Total Debt (lang- + kurzfristig); Nettoverschuldung = Net Debt "
-                   "(yfinance) bzw. Total Debt − Cash. Kundengelder = 'Deposit Liabilities' "
-                   "(Verwahrkundengelder, in 'Cash And Cash Equivalents' enthalten).")
-        _pypl_balance_detail_inner()
-
-
-def _pypl_balance_detail_inner() -> None:
-    with st.spinner("Lade PYPL (yfinance) …"):
-        companies = _load_reference_tickers(("PYPL",))
-    if not companies:
-        st.info("PYPL konnte nicht live geladen werden (kein yfinance/Netzwerk).")
-        return
-    m = companies[0]
-    cur = "USD"
-    mc = m.market_cap
-    if mc is not None and not mc.is_na():
-        st.write(f"**Marktkapitalisierung:** {mc.value / 1e9:,.2f} Mrd. {mc.currency} "
-                 f"(Stichtag: {m.market_cap_date or 'n/a'})")
-
-    def _m(y: dict, key: str):
-        met = y.get(key)
-        return met
-
-    rows = []
-    years = sorted(m.years, reverse=True)[:4]
-    for fy in years:
-        y = m.years[fy]
-        cash = _m(y, "_cash")
-        td = _m(y, "_total_debt")
-        nd = _m(y, "net_debt")
-        cd = _m(y, "customer_deposits")
-        ocf = _m(y, "operating_cashflow")
-        capex = _m(y, "capex")
-
-        def _b(met) -> str:
-            return "n/a" if (met is None or met.is_na()) else f"{met.value / 1e9:,.2f}"
-
-        # Nettoverschuldung: gemeldetes Net Debt, sonst Total Debt - Cash
-        if nd is not None and not nd.is_na():
-            nd_val, nd_src = nd.value, "Net Debt (gemeldet)"
-        elif td is not None and not td.is_na() and cash is not None and not cash.is_na():
-            nd_val, nd_src = td.value - cash.value, "Total Debt − Cash"
-        else:
-            nd_val, nd_src = float("nan"), "n/a"
-
-        # Kundengelder in Cash? PayPal verwahrt Kundengelder (10-K: in 'Cash and
-        # cash equivalents' enthalten). yfinance meldet keine Deposit-Liabilities-
-        # Zeile -> Pruefung auf 'Restricted Cash' als Naeherung; sonst unbekannt.
-        rc = _m(y, "_restricted_cash")
-        if cd is not None and not cd.is_na() and cash is not None and not cash.is_na() and cash.value > 0:
-            cd_share = cd.value / cash.value
-            cd_note = f"ja — {cd.value / 1e9:,.2f} Mrd. ({cd_share:.0%} von Cash)"
-        elif cd is not None and not cd.is_na():
-            cd_note = f"ja — {cd.value / 1e9:,.2f} Mrd. (Cash n/a)"
-        elif rc is not None and not rc.is_na() and rc.value > 0:
-            cd_note = (f"unbekannt (keine Deposit-Liabilities-Zeile); Restricted Cash "
-                       f"{rc.value / 1e9:,.2f} Mrd. als Naeherung")
-        else:
-            cd_note = ("unbekannt — yfinance meldet keine Deposit-Liabilities-Zeile; "
-                       "lt. 10-K sind Kundengelder in Cash enthalten")
-
-        rows.append({
-            "Jahr": fy,
-            "Cash (Mrd.)": _b(cash),
-            "Finanzschulden (Mrd.)": _b(td),
-            "Nettoverschuldung (Mrd.)": "n/a" if nd_val != nd_val else f"{nd_val / 1e9:,.2f}",
-            "ND-Quelle": nd_src,
-            "OCF (Mrd.)": _b(ocf),
-            "Capex (Mrd.)": _b(capex),
-            "Kundengelder (Mrd.)": "n/a" if (cd is None or cd.is_na()) else f"{cd.value / 1e9:,.2f}",
-            "Restricted Cash (Mrd.)": "n/a" if (rc is None or rc.is_na()) else f"{rc.value / 1e9:,.2f}",
-            "Kundengelder in Cash?": cd_note,
-        })
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
-    st.caption("Einheit: Mrd. USD (Berichtswährung); Jahr = Geschäftsjahr (Jahresende). "
-               "n/a = Daten fehlen (nie mit 0 gefüllt). PayPal verwahrt Kundengelder "
-               "(Deposit Liabilities); sie sind in 'Cash And Cash Equivalents' enthalten "
-               "und gehören wirtschaftlich nicht zum Unternehmen.")
+                # Nettoverschuldung: gemeldetes Net Debt, sonst Total Debt - Cash
+                if nd is not None and not nd.is_na():
+                    nd_val, nd_src = nd.value, "Net Debt (gemeldet)"
+                elif td is not None and not td.is_na() and cash is not None and not cash.is_na():
+                    nd_val, nd_src = td.value - cash.value, "Total Debt − Cash"
+                else:
+                    nd_val, nd_src = float("nan"), "n/a"
+                brows.append({
+                    "Jahr": fy,
+                    "Cash (Mrd.)": _b(cash),
+                    "Kurzfr. Anlagen (Mrd.)": _b(sti),
+                    "Finanzschulden (Mrd.)": _b(td),
+                    "Nettoverschuldung (Mrd.)": "n/a" if nd_val != nd_val else f"{nd_val / 1e9:,.2f}",
+                    "ND-Quelle": nd_src,
+                    "Kundengelder (Mrd.)": "n/a" if (cd is None or cd.is_na()) else f"{cd.value / 1e9:,.2f}",
+                    "Kundengelder in Cash?": _customer_deposit_note(cd, rc, cash),
+                })
+            st.dataframe(pd.DataFrame(brows), width="stretch", hide_index=True)
+            st.caption("Einheit: Mrd. Berichtswährung; Jahr = Geschaeftsjahr (Jahresende). "
+                       "n/a = Daten fehlen (nie mit 0 gefuellt). Kundengelder (Deposit "
+                       "Liabilities, z. B. PayPal) sind in 'Cash And Cash Equivalents' "
+                       "enthalten und gehoeren wirtschaftlich nicht zum Unternehmen; "
+                       "das DCF zieht die Nettoverschuldung ohne Kundengelder ab "
+                       "(addiert sie also zur gemeldeten Nettoverschuldung hinzu).")
 
 
 def dcf_section(m: TickerMetrics, row: dict | None) -> None:
@@ -818,10 +781,16 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     # --- Nettoverschuldung, Aktien, innerer Wert je Aktie, Kurs, MoS ---
-    latest_fy = max(m.years)
-    nd_m = m.years[latest_fy].get("net_debt")
-    nd_val = "n/a" if (nd_m is None or nd_m.is_na()) else nd_m.value
-    nd_s = "n/a" if nd_val != nd_val else f"{nd_val / 1e9:,.2f} Mrd. {nd_m.currency}"
+    # Nettoverschuldung OHNE Kundengelder (wie im DCF verwendet);
+    # Kundengelder (z. B. PYPL) sitzen in Cash und werden hinzuaddiert.
+    nd_val = dcf.net_debt
+    nd_s = "n/a"
+    if nd_val == nd_val:
+        nd_s = f"{nd_val / 1e9:,.2f} Mrd. {cur}"
+        if dcf.customer_deposits == dcf.customer_deposits:
+            nd_s += f" (exkl. Kundengelder {dcf.customer_deposits / 1e9:,.2f} Mrd.)"
+        if dcf.net_debt_source:
+            nd_s += f" · {dcf.net_debt_source}"
     price = None
     if m.market_cap is not None and not m.market_cap.is_na() and dcf.shares == dcf.shares:
         price = m.market_cap.value / dcf.shares
@@ -853,6 +822,33 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     mos = dcf.margin_of_safety
     st.write(f"**Kurs:** {'n/a' if price is None else f'{price:,.2f} {cur}'} · "
              f"**Margin of Safety (Base):** {'n/a' if mos != mos else f'{mos:.1%}'}")
+
+    # --- Startwert umschaltbar: O3J / juengstes GJ / TTM -> MoS Base nebeneinander ---
+    st.markdown("**Startwert (umschaltbar): MoS (Base) je FCF-Modus**")
+    mode_rows = []
+    for mode, label in (("avg3", "Ø letzte 3 GJ"), ("latest", "Jüngstes GJ"),
+                        ("ttm", "TTM (4 Quartale)")):
+        dcf_m = compute_dcf(m, CFG, fcf_mode=mode)
+        base_m = dcf_m.scenarios.get("base")
+        mos_m = dcf_m.margin_of_safety
+        vps_m = base_m.value_per_share if base_m is not None else float("nan")
+        basis_m = ("TTM" if dcf_m.fcf_basis == "ttm" else "GJ")
+        if dcf_m.fcf_basis == "ttm" and dcf_m.ttm_quarter_end:
+            basis_m = f"TTM bis {dcf_m.ttm_quarter_end[:7]}"
+        mode_rows.append({
+            "Modus": label,
+            "Basis": basis_m,
+            "Start-FCF n. SBC (Mrd.)": "n/a" if dcf_m.fcf_normalized != dcf_m.fcf_normalized
+            else f"{dcf_m.fcf_normalized_conv / 1e9:,.2f} {cur}",
+            "Wert je Aktie (Base)": "n/a" if vps_m != vps_m else f"{vps_m:,.2f} {cur}",
+            "Kurs": "n/a" if price is None else f"{price:,.2f} {cur}",
+            "MoS (Base)": "n/a" if mos_m != mos_m else f"{mos_m:.1%}",
+            "Aktiv": "●" if dcf_m.fcf_mode == dcf.fcf_mode else "",
+        })
+    st.dataframe(pd.DataFrame(mode_rows), width="stretch", hide_index=True)
+    st.caption("Startwert des DCF umschaltbar (config.yaml `dcf.fcf_mode`, Default 'auto': "
+               "TTM falls plausibel, sonst Ø letzte 3 GJ). '●' markiert den aktiven Modus. "
+               "MoS (Base) = 1 − Kurs / Wert je Aktie (Base) je Modus.")
 
     # --- Sensitivitaetstabelle: MoS (Base) ueber Diskontsatz x Terminal Growth ---
     st.markdown("**Sensitivität: MoS (Base) je Aktie**")
@@ -892,7 +888,8 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     buy = bool(row and row.get("is_buy"))
     if buy:
         st.success("[KAUF] Kaufkandidat (Quality >= 60, MoS Base >= 30 %, Bear >= 80 % des Kurses)")
-    st.caption("Formel: Innerer Wert = SUMME FCF_t/(1+r)^t (t=1..10) + [FCF_10 x (1+g)/(r-g)]/(1+r)^10; "
+    st.caption("Formel: Unternehmenswert = SUMME FCF_t/(1+r)^t (t=1..10) + [FCF_10 x (1+g)/(r-g)]/(1+r)^10; "
+               "Innerer Wert = Unternehmenswert − Nettoverschuldung (ohne Kundengelder); "
                "Wert je Aktie = Innerer Wert / verwässerte Aktien; "
                "MoS (Base) = 1 − Kurs / Wert je Aktie (Base). "
                "Kaufkandidat: Quality ≥ 60 UND MoS Base ≥ 30 % UND Bear ≥ 80 % des Kurses "

@@ -152,6 +152,10 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "dcf_fcf_basis": dcf.fcf_basis,
         "dcf_ttm_quarter_end": dcf.ttm_quarter_end,
         "dcf_fcf_sources": dcf.fcf_sources,
+        "dcf_net_debt": dcf.net_debt,
+        "dcf_net_debt_source": dcf.net_debt_source,
+        "dcf_customer_deposits": dcf.customer_deposits,
+        "dcf_fcf_mode": dcf.fcf_mode,
         "ttm_plausible": getattr(m, "ttm_plausible", True),
         "dcf_value_per_share_base": dcf.scenarios.get("base").value_per_share
         if dcf.scenarios.get("base") else float("nan"),
