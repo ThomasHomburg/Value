@@ -144,6 +144,12 @@ def page_ranking() -> None:
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
     view["MoS (Base)"] = view["margin_of_safety"].map(_fmt_pct)   # DCF, Build-Schritt 6
+    # v26: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø)
+    view["MoS Ø3J"] = view["mos_avg3"].map(_fmt_pct)
+    view["MoS jüngstes GJ"] = view["mos_latest"].map(_fmt_pct)
+    view["MoS TTM Ø"] = view["mos_ttm"].map(_fmt_pct)
+    # v26: MoS (Base) mit alternativer Nettoverschuldung
+    view["MoS alt. ND"] = view["mos_base_alt_nd"].map(_fmt_pct)
     view["MoS Bear"] = view["mos_bear"].map(_fmt_pct)
     view["MoS Bull"] = view["mos_bull"].map(_fmt_pct)
     view["Kandidat"] = view["kandidat"].map(lambda v: str(v))
@@ -153,7 +159,9 @@ def page_ranking() -> None:
                                 "quality": "Quality", "value": "Value", "flags": "Flags"})
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
-                 "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.", "MoS (Base)", "MoS Bear", "MoS Bull", "Kandidat", "Flags"]
+                 "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
+                 "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS alt. ND",
+                 "MoS Bear", "MoS Bull", "Kandidat", "Flags"]
     # Standard-Sortierung: Kaufkandidat zuerst, dann MoS (Base) absteigend
     view["_kauf"] = (view["Kandidat"] == "ja").astype(int)
     view["_mos"] = pd.to_numeric(view["MoS (Base)"].str.replace("n/a", "").str.rstrip("%"), errors="coerce")
@@ -195,7 +203,11 @@ def page_ranking() -> None:
         "ROIC letztes GJ": st.column_config.TextColumn("ROIC letztes GJ", help="ROIC des neuesten Geschäftsjahrs: NOPAT / (Eigenkapital + Nettoverschuldung), Kapitalbasis Jahresende; > 100 % = Kapitalbasis klein"),
         "ND/EBITDA": st.column_config.TextColumn("ND/EBITDA", help="Nettoverschuldung / EBITDA (x, neuestes Jahr)"),
         "EV/EBIT rel.": st.column_config.TextColumn("EV/EBIT rel.", help="EV/EBIT im Vergleich zum Sektor-Median (1,0 = Median)"),
-        "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario)"),
+        "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario, aktiver Startwert-Modus)"),
+        "MoS Ø3J": st.column_config.TextColumn("MoS Ø3J", help="MoS (Base) mit Start-FCF = Ø letzte 3 Geschäftsjahre (nach SBC)"),
+        "MoS jüngstes GJ": st.column_config.TextColumn("MoS jüngstes GJ", help="MoS (Base) mit Start-FCF = jüngstes Geschäftsjahr (nach SBC)"),
+        "MoS TTM Ø": st.column_config.TextColumn("MoS TTM Ø", help="MoS (Base) mit Start-FCF = Ø TTM + 2 nicht überlappende GJ (nach SBC)"),
+        "MoS alt. ND": st.column_config.TextColumn("MoS alt. ND", help="MoS (Base) mit alternativer Nettoverschuldung (anderer Modus: gemeldet vs. Schulden − (Cash + kurzfr. Anlagen))"),
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
         "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
@@ -448,6 +460,27 @@ def page_scorecard() -> None:
     # --- DCF: 3 Szenarien mit Annahmen und Jahres-Cashflows -------------------
     st.subheader("DCF – Innerer Wert je Aktie (3 Szenarien)")
     dcf_section(m, res["row"])
+
+    # v26: die vier letzten Quartale (OCF, Capex, SBC, FCF − SBC) mit Stichtag
+    ttm_obj = getattr(m, "ttm", None)
+    if ttm_obj is not None and getattr(ttm_obj, "quarters", None):
+        st.subheader("Letzte 4 Quartale (Cashflow, mit Stichtag)")
+        q_rows = []
+        cur_q = ttm_obj.quarters_currency or "n/a"
+        for q in ttm_obj.quarters:  # neuestes Quartal zuerst
+            def _qb(v) -> str:
+                return "n/a" if v != v else f"{v / 1e9:,.2f}"
+            q_rows.append({
+                "Quartal (Stichtag)": q["quarter_end"],
+                "OCF (Mrd.)": _qb(q["operating_cashflow"]),
+                "Capex (Mrd.)": _qb(q["capex"]),
+                "SBC (Mrd.)": _qb(q["stock_based_compensation"]),
+                "FCF − SBC (Mrd.)": _qb(q["fcf_sbc"]),
+            })
+        st.dataframe(pd.DataFrame(q_rows), width="stretch", hide_index=True)
+        st.caption(f"Einheit: Mrd. {cur_q}; Stichtag = Quartalsende. "
+                   f"FCF − SBC = (OCF − |Capex|) − Aktienvergütung; "
+                   f"Summe der 4 Quartale = TTM (Basis „{ttm_obj.base_label}“).")
 
     # Jahres-Charts
     st.subheader("Kennzahlen im Zeitverlauf (5 Jahre)")
@@ -783,6 +816,8 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     # --- Nettoverschuldung, Aktien, innerer Wert je Aktie, Kurs, MoS ---
     # Nettoverschuldung OHNE Kundengelder (wie im DCF verwendet);
     # Kundengelder (z. B. PYPL) sitzen in Cash und werden hinzuaddiert.
+    # v26: umschaltbar (config `dcf.net_debt_mode`) — gemeldet vs.
+    # Schulden − (Cash + kurzfristige Anlagen); beide MoS nebeneinander.
     nd_val = dcf.net_debt
     nd_s = "n/a"
     if nd_val == nd_val:
@@ -791,6 +826,12 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
             nd_s += f" (exkl. Kundengelder {dcf.customer_deposits / 1e9:,.2f} Mrd.)"
         if dcf.net_debt_source:
             nd_s += f" · {dcf.net_debt_source}"
+    nd_alt_val = dcf.net_debt_alt
+    nd_alt_s = "n/a"
+    if nd_alt_val == nd_alt_val:
+        nd_alt_s = f"{nd_alt_val / 1e9:,.2f} Mrd. {cur}"
+        if dcf.net_debt_alt_source:
+            nd_alt_s += f" · {dcf.net_debt_alt_source}"
     price = None
     if m.market_cap is not None and not m.market_cap.is_na() and dcf.shares == dcf.shares:
         price = m.market_cap.value / dcf.shares
@@ -822,6 +863,27 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     mos = dcf.margin_of_safety
     st.write(f"**Kurs:** {'n/a' if price is None else f'{price:,.2f} {cur}'} · "
              f"**Margin of Safety (Base):** {'n/a' if mos != mos else f'{mos:.1%}'}")
+
+    # v26: Nettoverschuldung umschaltbar — beide Varianten + MoS nebeneinander
+    st.markdown("**Nettoverschuldung (umschaltbar) und MoS (Base) je Variante**")
+    nd_mode_rows = [{
+        "Variante": ("gemeldet (Net Debt)" if dcf.net_debt_mode == "reported"
+                     else "Schulden − (Cash + kurzfr. Anlagen)"),
+        "Nettoverschuldung": nd_s,
+        "MoS (Base)": "n/a" if mos != mos else f"{mos:.1%}",
+        "Aktiv": "●",
+    }, {
+        "Variante": ("Schulden − (Cash + kurzfr. Anlagen)" if dcf.net_debt_mode == "reported"
+                     else "gemeldet (Net Debt)"),
+        "Nettoverschuldung": nd_alt_s,
+        "MoS (Base)": "n/a" if dcf.mos_base_alt != dcf.mos_base_alt else f"{dcf.mos_base_alt:.1%}",
+        "Aktiv": "",
+    }]
+    st.dataframe(pd.DataFrame(nd_mode_rows), width="stretch", hide_index=True)
+    st.caption("Nettoverschuldung umschaltbar (config.yaml `dcf.net_debt_mode`: "
+               "'reported' = gemeldet, 'incl_sti' = Finanzschulden − (Cash + "
+               "kurzfristige Anlagen); jeweils ohne Kundengelder). "
+               "Beide MoS (Base) nebeneinander; '●' markiert die aktive Variante.")
 
     # --- Startwert umschaltbar: O3J / juengstes GJ / TTM -> MoS Base nebeneinander ---
     st.markdown("**Startwert (umschaltbar): MoS (Base) je FCF-Modus**")

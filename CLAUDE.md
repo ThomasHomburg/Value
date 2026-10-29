@@ -65,11 +65,15 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - Terminal Growth: 2,5 %; Diskontsatz: 9 % (Config, bei Zyklikern 10 %)
 - Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert TV) - Nettoverschuldung OHNE Kundengelder (Kundengelder z. B. PYPL Deposit Liabilities sitzen in Cash -> werden hinzuaddiert)
 - Ausgabe: innerer Wert je Aktie je Szenario, Margin of Safety = 1 - Kurs / innerer Wert (Base)
-- **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety (Base) >= 30 % UND Bear-Szenario >= Kurs x 0,8
+- **Nettoverschuldung umschaltbar** (Config `dcf.net_debt_mode`): `reported` (gemeldet) oder `incl_sti` (Finanzschulden - (Cash + kurzfristige Anlagen)); beide Varianten werden gerechnet, die aktive per Config, die andere als `net_debt_alt` / `mos_base_alt`
+- **MoS je Startwert-Modus**: Rangliste zeigt MoS (Base) fur O3J / jungstes GJ / TTM nebeneinander; Kandidatenregel nutzt das Minimum der drei (Config `dcf.mos_min_mode`)
+- **Letzte 4 Quartale**: TtmResult.quarters (neuestes zuerst) mit OCF/Capex/SBC/FCF-SBC je Quartal + Stichtag (Scorecard-Anzeige)
+- **SEC-EDGAR-Abgleich** (`data/sec.py`, US-Ticker): OCF/Capex/SBC je Jahr gegen data.sec.gov/api/xbrl/companyfacts; Abweichung > `sec.tolerance` (5 %) -> Flag `sec:abweichend`. User-Agent MIT E-Mail (Config `sec.user_agent`, Platzhalter)
+- **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety >= 30 % (Minimum der Startwert-MoS, `dcf.mos_min_mode`) UND Bear-Szenario >= Kurs x 0,8
 
 ## UI (Streamlit)
 - **Seite 1 Rangliste**: sortierbare Tabelle (Ticker, Name, Sektor, Score, FCF-Yield, Margin of Safety, Flags), Filter nach Sektor/Land/Score
-- **Seite 2 Scorecard**: Block-Scores als Balken, 10-J.-Charts (Umsatz, FCF-Marge, ROIC, Verschuldung), DCF-Tabelle mit 3 Szenarien, Liste der Rohdaten mit Quelle und Datum
+- **Seite 2 Scorecard**: Block-Scores als Balken, 10-J.-Charts (Umsatz, FCF-Marge, ROIC, Verschuldung), DCF-Tabelle mit 3 Szenarien (beide Nettoverschuldungs-Varianten + MoS nebeneinander, MoS Base je Startwert-Modus), letzte 4 Quartale mit Stichtag, SEC-Abgleich-Hinweis, Liste der Rohdaten mit Quelle und Datum
 - **Seite 3 Import**: CSV-Upload und manuelle Eingabe als Fallback
 
 ## Build-Reihenfolge (Definition of Done je Schritt)

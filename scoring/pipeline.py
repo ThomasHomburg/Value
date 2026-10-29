@@ -56,11 +56,31 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     if (m.market_cap is not None and not m.market_cap.is_na()
             and dcf.shares == dcf.shares and dcf.shares > 0):
         price = m.market_cap.value / dcf.shares
+
+    # v26: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø)
+    mos_by_mode = {}
+    for mode in ("avg3", "latest", "ttm"):
+        dcf_m = compute_dcf(m, cfg, fcf_mode=mode)
+        mos_by_mode[mode] = dcf_m.margin_of_safety
+    mos_avg3 = mos_by_mode.get("avg3", float("nan"))
+    mos_latest = mos_by_mode.get("latest", float("nan"))
+    mos_ttm = mos_by_mode.get("ttm", float("nan"))
+
+    # v26: Kandidatenregel nutzt das konfigurierte MoS (min/avg3/latest/ttm/auto)
+    dc = cfg["dcf"]
+    mos_mode = str(dc.get("mos_min_mode", "min")).lower()
+    if mos_mode == "min":
+        mos_candidates = [v for v in (mos_avg3, mos_latest, mos_ttm) if v == v]
+        mos_rule = min(mos_candidates) if mos_candidates else float("nan")
+    elif mos_mode == "auto":
+        mos_rule = dcf.margin_of_safety
+    else:
+        mos_rule = mos_by_mode.get(mos_mode, float("nan"))
+
     # v21: Kandidatenregel auf Quality (statt Gesamtscore) umgestellt
-    dcf.is_buy = is_buy_candidate(result["quality"], dcf, price, cfg)
+    dcf.is_buy = is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_rule)
 
     # MoS je Szenario + Kandidaten-Begruendung (welche Bedingung fehlt)
-    dc = cfg["dcf"]
     quality_min = float(dc.get("buy_quality_min", 60))
     mos_min = float(dc.get("buy_margin_of_safety_min", 0.30))
     bear_floor = float(dc.get("buy_bear_floor", 0.80))
@@ -79,9 +99,13 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     if result["quality"] != result["quality"] or result["quality"] < quality_min:
         missing.append(f"Quality {result['quality']:.1f} < {quality_min:.0f}"
                        if result["quality"] == result["quality"] else "Quality n/a")
-    if dcf.margin_of_safety != dcf.margin_of_safety or dcf.margin_of_safety < mos_min:
-        missing.append(f"MoS Base {dcf.margin_of_safety:.1%} < {mos_min:.0%}"
-                       if dcf.margin_of_safety == dcf.margin_of_safety else "MoS Base n/a")
+    if mos_rule != mos_rule or mos_rule < mos_min:
+        if mos_rule == mos_rule:
+            mos_label = {"min": "MoS min(Ø3J/jüngstes/TTM)",
+                         "auto": "MoS Base"}.get(mos_mode, f"MoS {mos_mode}")
+            missing.append(f"{mos_label} {mos_rule:.1%} < {mos_min:.0%}")
+        else:
+            missing.append("MoS Base n/a")
     if (bear_vps is None or bear_vps.value_per_share != bear_vps.value_per_share
             or bear_vps.value_per_share < bear_floor * (price if price == price else float("nan"))):
         if price == price and bear_vps is not None and bear_vps.value_per_share == bear_vps.value_per_share:
@@ -118,6 +142,17 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         flag_parts.append("ttm:unplausibel")
         logger.warning("%s: Quartalsdaten unplausibel -> Rueckfall auf Geschaeftsjahre (DCF-Basis)",
                        m.ticker)
+    # v26: SEC-EDGAR-Abgleich (US-Ticker) — Abweichung > tolerance -> Flag
+    sec = None
+    if cfg.get("sec", {}).get("enabled", True):
+        try:
+            from data.sec import sec_check
+            sec = sec_check(m, cfg)
+            if sec.flag:
+                flag_parts.append("sec:abweichend")
+                logger.warning("%s: %s", m.ticker, sec.note)
+        except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
+            logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
     if dcf.is_buy:
         flag_parts.append("kauf")
         logger.info("%s: Kaufkandidat (Quality %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
@@ -147,6 +182,17 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         # MoS je Szenario + Kandidaten-Spalte (ja/nein + fehlende Bedingung)
         "mos_bear": mos_bear,
         "mos_bull": mos_bull,
+        # v26: MoS (Base) je Startwert-Modus (Rangliste nebeneinander)
+        "mos_avg3": mos_avg3,
+        "mos_latest": mos_latest,
+        "mos_ttm": mos_ttm,
+        "mos_rule": mos_rule,          # fuer Kandidatenregel verwendetes MoS (config mos_min_mode)
+        "mos_rule_mode": mos_mode,
+        # v26: MoS (Base) mit alternativer Nettoverschuldung
+        "mos_base_alt_nd": dcf.mos_base_alt,
+        "dcf_net_debt_mode": dcf.net_debt_mode,
+        "dcf_net_debt_alt": dcf.net_debt_alt,
+        "dcf_net_debt_alt_source": dcf.net_debt_alt_source,
         "kandidat": "ja" if dcf.is_buy else ("nein: " + "; ".join(missing) if missing else "nein"),
         # TTM-Basis des DCF (Scorecard-Anzeige: Stichtag + Basis)
         "dcf_fcf_basis": dcf.fcf_basis,
@@ -165,8 +211,13 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         if dcf.scenarios.get("bull") else float("nan"),
         "is_buy": dcf.is_buy,
         "flags": flags,
+        # v26: SEC-EDGAR-Abgleich
+        "sec_check_ok": bool(sec and sec.ok),
+        "sec_check_flag": bool(sec and sec.flag),
+        "sec_check_note": sec.note if sec else "",
     }
     out["row"] = row
+    out["sec_check"] = sec
     return out
 
 

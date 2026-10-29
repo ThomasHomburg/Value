@@ -45,6 +45,11 @@ class TtmResult:
     deviation: float = float("nan")  # max. relative Abweichung vs. Jahreswert
     fall_back_to_annual: bool = False
     checks: list[str] = field(default_factory=list)  # pro Kennzahl Abweichung
+    # v26: die 4 letzten Quartale einzeln (Scorecard-Anzeige) —
+    # quarters[0] = neuestes Quartal; Werte: {"operating_cashflow", "capex",
+    # "stock_based_compensation", "fcf_sbc"} in Berichtswährung.
+    quarters: list = field(default_factory=list)  # [{quarter_end, ocf, capex, sbc, fcf_sbc}]
+    quarters_currency: str = ""
 
 
 def _sum_last4(frames: dict, row_labels: dict[str, list[str]], key: str) -> tuple[float, list]:
@@ -113,7 +118,29 @@ def compute_ttm(m: TickerMetrics, quarterly: dict) -> TtmResult:
     res.base_label = f"TTM bis {res.quarter_end[:7]}"
 
     currency = m.market_cap.currency if m.market_cap else "USD"
+    res.quarters_currency = currency
     fy_ttm = last_q.year
+
+    # --- v26: die 4 letzten Quartale einzeln (Scorecard-Anzeige) ------------
+    # Neuestes Quartal zuerst; je Quartal OCF, Capex, SBC, FCF-SBC.
+    cf_cols = sorted(cf.columns, reverse=True) if cf is not None and not cf.empty else []
+    for c in cf_cols[:4]:
+        q_end = c.date().isoformat() if hasattr(c, "date") else str(c)
+        ocf_q = _stock_value(cf, row_map.get("operating_cashflow", []), c)
+        capex_q = _stock_value(cf, row_map.get("capex", []), c)
+        sbc_q = _stock_value(cf, row_map.get("stock_based_compensation", []), c)
+        fcf_q = _stock_value(cf, row_map.get("fcf", []), c)
+        if fcf_q != fcf_q and ocf_q == ocf_q and capex_q == capex_q:
+            fcf_q = ocf_q + capex_q  # Capex bei yfinance negativ
+        fcf_sbc_q = (fcf_q - sbc_q
+                     if (fcf_q == fcf_q and sbc_q == sbc_q) else float("nan"))
+        res.quarters.append({
+            "quarter_end": q_end,
+            "operating_cashflow": ocf_q,
+            "capex": capex_q,
+            "stock_based_compensation": sbc_q,
+            "fcf_sbc": fcf_sbc_q,
+        })
 
     # --- Flussgroessen: Summe letzte 4 Quartale ---
     src_map = {

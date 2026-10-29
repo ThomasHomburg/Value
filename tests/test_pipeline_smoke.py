@@ -27,6 +27,12 @@ APP_ROW_COLUMNS = {
     "dcf_value_per_share_base", "dcf_value_per_share_bear",
     "dcf_value_per_share_bull",
     "is_buy", "flags",
+    # v26: MoS je Startwert-Modus + umschaltbare Nettoverschuldung
+    "mos_avg3", "mos_latest", "mos_ttm", "mos_rule", "mos_rule_mode",
+    "mos_base_alt_nd", "dcf_net_debt_mode", "dcf_net_debt_alt",
+    "dcf_net_debt_alt_source",
+    # v26: SEC-EDGAR-Abgleich
+    "sec_check_ok", "sec_check_flag", "sec_check_note",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen
@@ -36,7 +42,13 @@ DCF_RESULT_FIELDS = {
     "margin_of_safety", "is_buy", "fcf_normalized_conv",
     "fcf_basis", "ttm_quarter_end", "fcf_sources",
     "net_debt", "net_debt_source", "customer_deposits", "fcf_mode",
+    # v26: umschaltbare Nettoverschuldung
+    "net_debt_mode", "net_debt_alt", "net_debt_alt_source", "mos_base_alt",
 }
+
+
+# SEC-Abgleich wird zentral in tests/conftest.py deaktiviert (autouse),
+# damit dieser Smoke-Test keine echten HTTP-Calls gegen data.sec.gov macht.
 
 
 def test_dcf_result_hat_alle_felder():

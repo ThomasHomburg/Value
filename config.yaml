@@ -164,6 +164,17 @@ dcf:
   fcf_avg_years: 3
   fcf_mode: auto              # DCF-Startwert: auto (TTM falls plausibel, sonst O3J)
                               # | avg3 (O letzte 3 GJ) | latest (juengstes GJ) | ttm
+  net_debt_mode: reported     # Nettoverschuldung: reported (gemeldet) |
+                              # incl_sti (Schulden - (Cash + kurzfr. Anlagen))
+  mos_min_mode: min           # Kandidatenregel MoS: min (Minimum der 3 Startwert-MoS)
+                              # | avg3 | latest | ttm | auto (wie fcf_mode)
   buy_quality_min: 60         # Kaufkandidat: Quality-Score >= 60 (statt Gesamtscore)
   buy_margin_of_safety_min: 0.30
   buy_bear_floor: 0.80
+
+sec:
+  # SEC-EDGAR-Abgleich (kostenlos, data.sec.gov). User-Agent MIT E-Mail als
+  # Platzhalter -- vor Produktivbetrieb eigene E-Mail eintragen (SEC-Policy).
+  user_agent: "Value-Screener research@example.com"
+  enabled: true               # false = Abgleich deaktivieren
+  tolerance: 0.05             # Flag "Quellen weichen ab" ab > 5 % Abweichung je Jahr
