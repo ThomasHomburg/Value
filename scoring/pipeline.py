@@ -14,7 +14,7 @@ from data.metrics import fcf_yield, fcf_yield_sbc, roic
 from data.sanity import check_ticker
 from scoring.criteria import compute_criteria, active_criteria
 from scoring.sectors import sector_rule, normalized_net_income, price_to_book, dividend_yield
-from scoring.filters import check_filters
+from scoring.filters import check_filters, count_value_years
 from scoring.score import score_ticker
 from valuation.dcf import compute_dcf, is_buy_candidate
 
@@ -38,6 +38,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     for r in reasons:
         logger.info("%s ausgeschlossen: %s", m.ticker, r)
     out["excluded"] = reasons
+    # v29: gezahlte Jahre (mit Werten) fuer die Ausschlusstabelle
+    out["history_years"] = count_value_years(m)
     if reasons:
         return out
 
@@ -194,6 +196,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 logger.warning("%s: %s", m.ticker, sec.note)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
+    # v29: EBITDA unplausibel (EBITDA < EBIT) -> Flag + ND/EBITDA n/a
+    if getattr(m, "ebitda_unplausible", False):
+        flag_parts.append("ebitda:unplausibel")
+        logger.warning("%s: EBITDA < EBIT in mind. einem Jahr -> Flag 'EBITDA unplausibel'; ND/EBITDA n/a",
+                       m.ticker)
     # v28: Zykliker mit weniger Jahren als normalize_years -> Flag + Log
     if rule.group == "cyclicals" and 0 < norm_years < max(1, rule.normalized_earnings_years):
         flag_parts.append("zyk:norm<7J")
@@ -282,6 +289,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "sec_check_ok": bool(sec and sec.ok),
         "sec_check_flag": bool(sec and sec.flag),
         "sec_check_note": sec.note if sec else "",
+        # v29: EBITDA-Plausibilitaet + Historie (Jahre mit Werten)
+        "ebitda_unplausible": bool(getattr(m, "ebitda_unplausible", False)),
+        "history_years": count_value_years(m),
     }
     out["row"] = row
     out["sec_check"] = sec
@@ -298,7 +308,8 @@ def evaluate_all(companies: list[TickerMetrics], cfg: dict) -> tuple[list[dict],
     for m in companies:
         res = evaluate_ticker(m, cfg)
         if res["row"] is None:
-            excluded.append({"ticker": m.ticker, "name": m.name, "reasons": res["excluded"]})
+            excluded.append({"ticker": m.ticker, "name": m.name, "reasons": res["excluded"],
+                             "history_years": res.get("history_years", 0)})
         else:
             rows.append(res["row"])
     rows.sort(key=lambda r: (r["score"] if r["score"] == r["score"] else -1), reverse=True)

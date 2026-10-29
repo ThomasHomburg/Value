@@ -23,6 +23,12 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v29: Historie-Filter, EBITDA aus Cashflow, Quartals-Summenzeile
+- **Harter Filter "Historie"**: zaehlt Jahre mit tatsaechlichen Werten (nicht Spalten; Kernkennzahlen revenue/ebit/net_income/ocf/equity ungleich NaN), Schwelle `filters.min_history_years` (4). Die Ausschlusstabelle zeigt die gezählten Jahre je Ticker ("Jahre mit Werten").
+- **EBITDA = EBIT + Abschreibungen (D&A)** aus dem Cashflow-Statement (`Depreciation And Amortization`), NICHT das Yahoo/FMP-EBITDA-Feld (weicht teils ab, z. B. UBER FY2025: 6,99 vs. 6,31 Mrd. USD). Fallback: gemeldetes EBITDA, wenn kein D&A gemeldet. EBITDA < EBIT in mind. einem Jahr -> Flag `ebitda:unplausibel` und ND/EBITDA = n/a.
+- **Quartalstabelle** (Scorecard): alle 4 Quartale + **Summenzeile** (muss dem TTM entsprechen).
+- **SEC-Status in der Rangliste**: Spalte "SEC" (ok / ⚠ Quellen weichen ab / n/a) aus dem EDGAR-Abgleich (v26).
+
 ## Universumslader (Schritt 8)
 - **S&P 500**: Liste von der Wikipedia-Tabelle (`pandas.read_html` auf „List of S&P 500 companies“, eigener User-Agent), Ergebnis als **`tickers_sp500.csv`** gespeichert (503 Ticker, ist im Repo).
 - **STOXX 600**: Import per CSV (`tickers_stoxx600.csv`, Spalte `ticker`; nicht im Repo, .gitignore).
@@ -31,7 +37,7 @@ python3 -m streamlit run app.py
 
 **Scoring:** Quality- und Value-Score getrennt (`score_groups` in config.yaml); Gesamtscore = 0,75×Quality + 0,25×Value. n/a-Kriterien werden ausgeschlossen und die übrigen Gewichte renormalisiert; **Datenabdeckung** zeigt den Anteil bewerteter Gewichte. Alle Scores und Prozentwerte werden in der Anzeige auf 1 Nachkommastelle gerundet (Berechnung ungerundet). Der Value-Score nutzt **FCF-Yield nach SBC** (FCF − Aktienverguetung, Ø3J) 30 %, **MoS (Base)** aus dem DCF 40 % (voll ab 40 %, null bei ≤ 0 %) und **EV/EBIT rel.** 30 %. Quality-Schwellen verschaerft: ROIC voll ab 35 %, Umsatz-CAGR voll ab 15 %, FCF-Marge voll ab 30 %. Marktkapitalisierung mit Stichtag (Abrufdatum, ISO).
 
-**Flags** (entdoppelt): Blöcke mit >30 % fehlenden Daten (`blk:duenn`); ROIC > 100 % → `kl.Kapital` (kleine/negative Kapitalbasis, z. B. Net Cash); Kriterien mit < 5 Jahren Daten → `duenn` (konfigurierbar: `data.thin_years`); **Kaufkandidat → `kauf`** (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs).
+**Flags** (entdoppelt): Blöcke mit >30 % fehlenden Daten (`blk:duenn`); ROIC > 100 % → `kl.Kapital` (kleine/negative Kapitalbasis, z. B. Net Cash); Kriterien mit < 5 Jahren Daten → `duenn` (konfigurierbar: `data.thin_years`); **Kaufkandidat → `kauf`** (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); EBITDA < EBIT → `ebitda:unplausibel` (ND/EBITDA n/a).
 
 ## CLI (ohne Browser)
 

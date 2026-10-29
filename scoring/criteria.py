@@ -33,15 +33,15 @@ class CriterionResult:
 Calc = Callable[[TickerMetrics, dict, Any], CriterionResult]
 
 
-_RULE_CACHE: dict[int, object] = {}
-
-
 def _rule(m: TickerMetrics, cfg) -> object:
-    """Sektorregel (Industry-basiert) je Ticker; gecacht pro TickerMetrics."""
-    key = id(m)
-    if key not in _RULE_CACHE:
-        _RULE_CACHE[key] = sector_rule(m, cfg)
-    return _RULE_CACHE[key]
+    """Sektorregel (Industry-basiert) je Ticker; gecacht auf dem Objekt selbst
+    (id()-basierter Cache ist unsicher: id() wird nach Garbage Collection neu
+    vergeben und wuerde falsche Regeln liefern)."""
+    cached = m.__dict__.get("_sector_rule_cache")
+    if cached is None:
+        cached = sector_rule(m, cfg)
+        m.__dict__["_sector_rule_cache"] = cached
+    return cached
 
 
 def _values(metrics: TickerMetrics, name: str) -> list[tuple[int, float]]:
@@ -122,6 +122,9 @@ def calc_net_debt_ebitda(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     # v28: Banken/Versicherer nutzen P/B statt ND/EBITDA
     if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v29: EBITDA unplausibel (EBITDA < EBIT) -> ND/EBITDA als n/a
+    if getattr(m, "ebitda_unplausible", False):
         return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "net_debt", "ebitda")
     nd = [v for _, v in _values(m, "net_debt")]

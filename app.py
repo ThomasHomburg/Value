@@ -183,9 +183,11 @@ def page_ranking() -> None:
     # (nicht im Expander versteckt)
     if excluded:
         st.markdown(f"**Ausgeschlossene Ticker ({len(excluded)}, harte Filter)**")
+        # v29: gezahlte Jahre (mit tatsaechlichen Werten, nicht Spalten) je Ticker
         excl_rows = [{
             "Ticker": e["ticker"],
             "Name": e["name"],
+            "Jahre mit Werten": e.get("history_years", 0),
             "Grund": "; ".join(e["reasons"]),
         } for e in excluded]
         st.dataframe(pd.DataFrame(excl_rows), width="stretch", hide_index=True)
@@ -519,10 +521,22 @@ def page_scorecard() -> None:
                 f"SBC (Mrd. {cur_q})": _qb(q["stock_based_compensation"]),
                 f"FCF − SBC (Mrd. {cur_q})": _qb(q["fcf_sbc"]),
             })
+        # v29: Summenzeile -- muss dem TTM entsprechen
+        def _qs(*vals) -> str:
+            if all(v == v for v in vals):
+                return f"{sum(vals) / 1e9:,.2f}"
+            return "n/a"
+        q_rows.append({
+            "Quartal (Stichtag)": "Summe (= TTM)",
+            f"OCF (Mrd. {cur_q})": _qs(*[q["operating_cashflow"] for q in ttm_obj.quarters]),
+            f"Capex (Mrd. {cur_q})": _qs(*[q["capex"] for q in ttm_obj.quarters]),
+            f"SBC (Mrd. {cur_q})": _qs(*[q["stock_based_compensation"] for q in ttm_obj.quarters]),
+            f"FCF − SBC (Mrd. {cur_q})": _qs(*[q["fcf_sbc"] for q in ttm_obj.quarters]),
+        })
         st.dataframe(pd.DataFrame(q_rows), width="stretch", hide_index=True)
         st.caption(f"Einheit: Mrd. {cur_q}; Stichtag = Quartalsende. "
                    f"FCF − SBC = (OCF − |Capex|) − Aktienvergütung; "
-                   f"Summe der 4 Quartale = TTM (Basis „{ttm_obj.base_label}“).")
+                   f"Summenzeile der 4 Quartale = TTM (Basis „{ttm_obj.base_label}“).")
 
     # Jahres-Charts
     st.subheader("Kennzahlen im Zeitverlauf (5 Jahre)")

@@ -44,6 +44,11 @@ _ROW_MAP = {
     "capex": ["Capital Expenditure", "Purchase Of PPE"],
     "stock_based_compensation": ["Stock Based Compensation", "Stock Based Compensation"],
     "_fcf_reported": ["Free Cash Flow"],
+    # v29: EBITDA = EBIT + D&A aus dem Cashflow-Statement (nicht das Yahoo-Feld)
+    "depreciation_amortization": ["Depreciation And Amortization",
+                                  "Depreciation & Amortization",
+                                  "Depreciation Amortization And Accretion",
+                                  "Depreciation And Amortization Cash Flow"],
 }
 
 
@@ -169,9 +174,23 @@ class YfinanceProvider:
                     year_metrics[key] = Metric(key, _pick(balance, _ROW_MAP[key], bal_col),
                                                "currency", currency, fy)
             if cf_col is not None:
-                for key in ("operating_cashflow", "capex", "stock_based_compensation", "_fcf_reported"):
+                for key in ("operating_cashflow", "capex", "stock_based_compensation", "_fcf_reported",
+                            "depreciation_amortization"):
                     year_metrics[key] = Metric(key, _pick(cashflow, _ROW_MAP[key], cf_col),
                                                "currency", currency, fy)
+
+            # v29: EBITDA = EBIT + D&A aus dem Cashflow-Statement (nicht das
+            # Yahoo-EBITDA-Feld); Fallback: gemeldetes EBITDA wenn D&A fehlt.
+            ebit_m = year_metrics.get("ebit")
+            da_m = year_metrics.get("depreciation_amortization")
+            if (ebit_m is not None and da_m is not None
+                    and not math.isnan(ebit_m.value) and not math.isnan(da_m.value)):
+                year_metrics["ebitda"] = Metric("ebitda", ebit_m.value + da_m.value,
+                                                "currency", currency, fy)
+            eb_m = year_metrics.get("ebitda")
+            if (eb_m is not None and ebit_m is not None and not eb_m.is_na()
+                    and not math.isnan(ebit_m.value) and eb_m.value < ebit_m.value):
+                result.ebitda_unplausible = True
 
             # Nettoverschuldung: yfinance 'Net Debt' bevorzugt; sonst Total Debt - Cash
             nd = year_metrics.get("net_debt")

@@ -43,7 +43,10 @@ providers:
 filters:
   # Harte Ausschlussfilter (vor dem Scoring). Betraege in absoluten USD.
   min_market_cap_usd: 500000000     # Marktkapitalisierung < 500 Mio. USD
-  min_history_years: 5              # weniger als 5 Jahre Datenhistorie
+  # v29: Jahre mit tatsaechlichen Werten (nicht Spalten): ein Jahr zaehlt nur,
+  # wenn mindestens eine Kernkennzahl (revenue/ebit/net_income/ocf/equity)
+  # einen Wert ungleich NaN hat. Leere Spalten zaehlen nicht.
+  min_history_years: 4              # weniger als 4 Jahre mit Werten -> Ausschluss
   min_avg_fcf_5y_usd: 0             # Ø-FCF ueber 5 Jahre > 0 (negativ)
   min_equity_usd: 0                 # Eigenkapital < 0 (negativ)
   min_revenue_cagr_5y: -0.03        # Umsatz-CAGR 5 J. < -3 % (Value-Trap-Filter)

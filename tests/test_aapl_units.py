@@ -123,7 +123,11 @@ def test_aapl_roe(aapl_metrics):
 def test_aapl_net_debt_ebitda_negative(aapl_metrics):
     nd = aapl_metrics.years[2024]["net_debt"].value
     eb = aapl_metrics.years[2024]["ebitda"].value
-    assert nd / eb == pytest.approx(-37591000000 / 134661000000)
+    # v29: EBITDA = EBIT + D&A aus dem Cashflow-Statement (nicht das Yahoo-Feld)
+    ebit = aapl_metrics.years[2024]["ebit"].value
+    da = aapl_metrics.years[2024]["depreciation_amortization"].value
+    assert eb == pytest.approx(ebit + da)
+    assert nd / eb == pytest.approx(-37591000000 / (123216000000 + 10801000000))
 
 
 def test_aapl_interest_coverage_high(aapl_metrics):

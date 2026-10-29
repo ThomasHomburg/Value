@@ -39,6 +39,8 @@ APP_ROW_COLUMNS = {
     "sector_group", "sector_note", "industry",
     "normalized_earnings", "normalized_earnings_years",
     "price_to_book", "dividend_yield",
+    # v29: EBITDA-Plausibilitaet + Historie (Jahre mit Werten)
+    "ebitda_unplausible", "history_years",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen
