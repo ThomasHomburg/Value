@@ -261,6 +261,9 @@ score_groups:
   weights:
     quality: 0.75
     value: 0.25
+  # v33: Value-Score wird als "n/a" angezeigt, wenn die Datenabdeckung darunter
+  # liegt (zu wenige bewertete Kriterien -> Value-Aussage nicht belastbar)
+  min_coverage_value: 0.70
 
 sanity:
   # Plausibilitaetsgrenzen [min, max] fuer den Sanity-Check (Log-Markierung).

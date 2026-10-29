@@ -222,6 +222,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 logger.warning("%s: %s", m.ticker, sec.note)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
+    # v33: SBC fehlt -> DCF/FCF ohne SBC (Fallback Roh-FCF) -> Flag
+    if dcf.sbc_missing:
+        flag_parts.append("SBC n/a (ohne SBC)")
+        logger.warning("%s: kein FCF-SBC verfuegbar -> FCF und DCF OHNE SBC (Roh-FCF) verwendet",
+                       m.ticker)
     # v29: EBITDA unplausibel (EBITDA < EBIT) -> Flag + ND/EBITDA n/a
     if getattr(m, "ebitda_unplausible", False):
         flag_parts.append("ebitda:unplausibel")
@@ -325,6 +330,10 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         # v29: EBITDA-Plausibilitaet + Historie (Jahre mit Werten)
         "ebitda_unplausible": bool(getattr(m, "ebitda_unplausible", False)),
         "history_years": count_value_years(m),
+        # v33: SBC-Fallback (DCF ohne SBC) + Start-FCF <= 0 + Value-n/a-Schwelle
+        "dcf_sbc_missing": bool(dcf.sbc_missing),
+        "dcf_fcf_le0": bool(dcf.fcf_le0),
+        "value_na_below_coverage": float(cfg.get("score_groups", {}).get("min_coverage_value", 0.70)),
     }
     out["row"] = row
     out["sec_check"] = sec

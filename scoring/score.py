@@ -116,6 +116,12 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
                      if b in block_scores and block_scores[b] == block_scores[b]]
         result["quality"] = _r1(_weighted_mean(q_entries))
         result["value"] = _r1(_weighted_mean(v_entries))
+        # v33: Value als n/a, wenn Datenabdeckung < score_groups.min_coverage_value
+        min_cov = 0.70
+        if groups_cfg:
+            min_cov = float(groups_cfg.get("min_coverage_value", 0.70))
+        if (result["coverage"] == result["coverage"] and result["coverage"] < min_cov):
+            result["value"] = float("nan")
 
         # Gesamtscore aus Gruppen, renormalisiert falls eine Gruppe n/a
         g_entries = []

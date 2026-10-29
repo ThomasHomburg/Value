@@ -83,6 +83,13 @@ def _fmt_pct(v: float) -> str:
     return "n/a" if (v != v) else f"{v:.1%}"
 
 
+def _fmt_mos(v: float, le0: bool = False) -> str:
+    # v33: Start-FCF <= 0 -> "Start-FCF <= 0" statt n/a
+    if le0:
+        return "Start-FCF ≤ 0"
+    return "n/a" if (v != v) else f"{v:.1%}"
+
+
 # --- Seite 1: Rangliste ------------------------------------------------------
 
 def page_ranking() -> None:
@@ -136,7 +143,8 @@ def page_ranking() -> None:
     view["Quality-Rang"] = view["ticker"].map(lambda t: "n/a" if q_rank.get(t) is None else str(q_rank[t]))
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
-    view["MoS (Base)"] = view["margin_of_safety"].map(_fmt_pct)   # DCF, Build-Schritt 6
+    view["MoS (Base)"] = view.apply(
+        lambda r: _fmt_mos(r["margin_of_safety"], bool(r.get("dcf_fcf_le0", False))), axis=1)  # v33: Start-FCF <= 0
     # v27: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø / TTM)
     view["MoS Ø3J"] = view["mos_avg3"].map(_fmt_pct)
     view["MoS jüngstes GJ"] = view["mos_latest"].map(_fmt_pct)
@@ -167,9 +175,15 @@ def page_ranking() -> None:
     view["MoS Bull"] = view["mos_bull"].map(_fmt_pct)
     view["Kandidat"] = view["kandidat"].map(lambda v: str(v))
     view["Datenabdeckung"] = view["coverage"].map(lambda v: "n/a" if (v != v) else f"{v:.1%}")
+    # v33: Value als "n/a", wenn Datenabdeckung < score_groups.min_coverage_value
+    min_cov = float(CFG.get("score_groups", {}).get("min_coverage_value", 0.70))
+    view["Value"] = view.apply(
+        lambda r: "n/a" if (r["value"] != r["value"]
+                            or (r["coverage"] == r["coverage"] and r["coverage"] < min_cov))
+        else f"{r['value']:.1f}", axis=1)
     view = view.rename(columns={"ticker": "Ticker", "name": "Name", "sector": "Sektor",
                                 "source": "Quelle", "score": "Score",
-                                "quality": "Quality", "value": "Value", "flags": "Flags"})
+                                "quality": "Quality", "flags": "Flags"})
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
@@ -225,7 +239,7 @@ def page_ranking() -> None:
         "Score": st.column_config.NumberColumn("Score", help="Gesamtscore = 0,75×Quality + 0,25×Value (0–100)", format="%.1f"),
         "Quality": st.column_config.NumberColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat", format="%.1f"),
         "Quality-Rang": st.column_config.TextColumn("Quality-Rang", help="Rang nach Quality-Score im Universum (1 = bester); Gleichstand = gleicher Rang; n/a = Quality nicht berechenbar"),
-        "Value": st.column_config.NumberColumn("Value", help="Value-Score (0–100): Bewertungs-Kriterien", format="%.1f"),
+        "Value": st.column_config.TextColumn("Value", help="Value-Score (0–100); n/a wenn Datenabdeckung < score_groups.min_coverage_value (70 %)"),
         "Datenabdeckung": st.column_config.TextColumn("Datenabdeckung", help="Anteil bewerteter Kriterien-Gewichte (n/a-Kriterien herausgerechnet, übrige renormalisiert)"),
         "FCF-Yield": st.column_config.TextColumn("FCF-Yield", help="FCF / Marktkapitalisierung (aktuelles Geschäftsjahr)"),
         "FCF-Yield nach SBC": st.column_config.TextColumn("FCF-Yield nach SBC", help="(FCF − Aktienverguetung) / Marktkapitalisierung (aktuelles Jahr)"),
@@ -944,13 +958,13 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
         "Variante": ("gemeldet (Net Debt)" if dcf.net_debt_mode == "reported"
                      else "Schulden − (Cash + kurzfr. Anlagen)"),
         "Nettoverschuldung": nd_s,
-        "MoS (Base)": "n/a" if mos != mos else f"{mos:.1%}",
+        "MoS (Base)": "Start-FCF ≤ 0" if dcf.fcf_le0 else ("n/a" if mos != mos else f"{mos:.1%}"),
         "Aktiv": "●",
     }, {
         "Variante": ("Schulden − (Cash + kurzfr. Anlagen)" if dcf.net_debt_mode == "reported"
                      else "gemeldet (Net Debt)"),
         "Nettoverschuldung": nd_alt_s,
-        "MoS (Base)": "n/a" if dcf.mos_base_alt != dcf.mos_base_alt else f"{dcf.mos_base_alt:.1%}",
+        "MoS (Base)": "Start-FCF ≤ 0" if dcf.fcf_le0 else ("n/a" if dcf.mos_base_alt != dcf.mos_base_alt else f"{dcf.mos_base_alt:.1%}"),
         "Aktiv": "",
     }]
     st.dataframe(pd.DataFrame(nd_mode_rows), width="stretch", hide_index=True)
@@ -990,9 +1004,9 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
             "Wert je Aktie (Bear)": "n/a" if vps_bear_m != vps_bear_m else f"{vps_bear_m:,.2f} {cur}",
             "Wert je Aktie (Bull)": "n/a" if vps_bull_m != vps_bull_m else f"{vps_bull_m:,.2f} {cur}",
             "Kurs": "n/a" if price is None else f"{price:,.2f} {cur}",
-            "MoS (Base)": "n/a" if mos_m != mos_m else f"{mos_m:.1%}",
-            "MoS (Bear)": "n/a" if mos_bear_m != mos_bear_m else f"{mos_bear_m:.1%}",
-            "MoS (Bull)": "n/a" if mos_bull_m != mos_bull_m else f"{mos_bull_m:.1%}",
+            "MoS (Base)": ("Start-FCF ≤ 0" if dcf_m.fcf_le0 else ("n/a" if mos_m != mos_m else f"{mos_m:.1%}")),
+            "MoS (Bear)": ("Start-FCF ≤ 0" if dcf_m.fcf_le0 else ("n/a" if mos_bear_m != mos_bear_m else f"{mos_bear_m:.1%}")),
+            "MoS (Bull)": ("Start-FCF ≤ 0" if dcf_m.fcf_le0 else ("n/a" if mos_bull_m != mos_bull_m else f"{mos_bull_m:.1%}")),
             "Aktiv": "●" if dcf_m.fcf_mode == dcf.fcf_mode else "",
         })
     st.dataframe(pd.DataFrame(mode_rows), width="stretch", hide_index=True)

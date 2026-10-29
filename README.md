@@ -23,6 +23,15 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v33: SBC-Fallback, Value-n/a bei Coverage < 70 %, MoS „Start-FCF ≤ 0“, Quality-Rang ganzzahlig
+- **SBC fehlt** → FCF und DCF **ohne SBC** (Fallback auf Roh-FCF in `_avg_fcf_start`/`_ttm_fcf_start`/`_ttm_only_fcf_start`) mit Flag **`SBC n/a (ohne SBC)`** (`DcfResult.sbc_missing`). Live: CAT, XOM, JPM, TRV, WFC, AIG, MET, CSX, DUK, DOW.
+- **Value = „n/a“** bei Datenabdeckung < `score_groups.min_coverage_value` (70 %) — `scoring/score.py` setzt `value=NaN`, Rangliste zeigt „n/a“. Live: JPM (30 %), MS/GS (40 %), WFC/EQIX (50 %), BAC/AIG/TRV/MET/DUK/DOW (60 %).
+- **MoS-Zelle „Start-FCF ≤ 0“** statt „n/a“ bei Start-FCF ≤ 0 (`DcfResult.fcf_le0`; Rangliste + Modus-Tabelle + ND-Tabelle via `_fmt_mos`).
+- **Quality-Rang als Ganzzahl** (`rank_rows` → `int`, Gleichstand = gleicher Rang, NaN → „n/a“).
+
+## v32: Volllauf-CLI (run_ranking.py --tickers) + SEC-Rate-Limit (5/s)
+- `python run_ranking.py --tickers tickers_sp500.csv [--out ranking_sp500.csv] [--batch 20] [--pause 2.0] [--cache .ranking_cache.json] [--no-resume]`: Batches, Pause, Fortschritt, Wiederaufnahme (Cache), Fehlerlog je Ticker, Ergebnis-CSV. SEC-Rate-Limit `sec.max_requests_per_second` (5/s), User-Agent aus `sec.user_agent`.
+
 ## v30/v31: candidate_mode (2 Regeln), 8 Quartale + YoY, Matrix nach Status
 - **`dcf.candidate_mode`** (`min_all` Default = Minimum aus allen 4 Modi Ø3J/jüngstes GJ/TTM Ø/TTM; `min_recent2` = Minimum aus jüngstem GJ + TTM). Rangliste zeigt **„Status (alle Modi)“ und „Status (jüngste 2)“** nebeneinander; die aktive Regel (config) ist die Spalte „Status“. Beispiel live: ADBE → alle Modi = Beobachtung (21,0 %), jüngste 2 = Kandidat (36,3 %).
 - **Quartalstabelle (Scorecard)**: 8 Quartale (4 aktuelle + 4 Vorjahresquartale) mit Spalte **„YoY je Quartal“** (FCF−SBC vs. Vorjahresquartal); Summenzeile nur über die 4 aktuellen Quartale (= TTM).

@@ -57,6 +57,8 @@ class DcfResult:
     net_debt_source: str = ""        # "net_debt (gemeldet, exkl. Kundengelder)" | "total_debt - cash" | "n/a"
     customer_deposits: float = float("nan")  # Kundengelder (z. B. PYPL), in Cash enthalten
     fcf_mode: str = "auto"           # Startwert-Modus: "auto" | "avg3" | "latest" | "ttm" | "ttm_only"
+    sbc_missing: bool = False        # v33: True wenn kein FCF-SBC verfuegbar -> Roh-FCF ohne SBC verwendet
+    fcf_le0: bool = False            # v33: True wenn Start-FCF <= 0 (MoS n/a, Anzeige "Start-FCF <= 0")
     net_debt_mode: str = "reported"  # "reported" (gemeldet) | "incl_sti" (Schulden − (Cash+kurzfr.Anl.))
     net_debt_alt: float = float("nan")  # alternative Nettoverschuldung (anderer Modus, Berichtsw.)
     net_debt_alt_source: str = ""    # Quelle der alternativen Nettoverschuldung
@@ -135,6 +137,11 @@ def _ttm_fcf_start(m: TickerMetrics) -> dict | None:
             or getattr(m, "ttm_fallback", False)):
         return None
     ttm_fcf = ttm.ttm.get("fcf_sbc")
+    sbc_missing = False
+    if ttm_fcf is None or ttm_fcf.is_na():
+        # v33: TTM ohne SBC -> Fallback auf Roh-FCF TTM
+        ttm_fcf = ttm.ttm.get("fcf")
+        sbc_missing = True
     if ttm_fcf is None or ttm_fcf.is_na():
         return None
     ttm_end = ttm.quarter_end  # ISO-Stichtag letztes Quartal
@@ -152,21 +159,26 @@ def _ttm_fcf_start(m: TickerMetrics) -> dict | None:
             continue
         if _date.fromisoformat(fe) < window_start:
             prior_fys.append(fy)
-    fy_vals = []
+    # v33: Vorjahres-GJ ebenfalls auf Roh-FCF fallbacken, wenn deren fcf_sbc fehlt
+    fy_vals_fb = []
     for fy in prior_fys[:2]:
         met = m.years[fy].get("fcf_sbc")
+        if met is None or met.is_na():
+            met = m.years[fy].get("fcf")
+            sbc_missing = True
         if met is not None and not met.is_na():
-            fy_vals.append((fy, met.value, met.currency))
-    if len(fy_vals) < 2:
+            fy_vals_fb.append((fy, met.value, met.currency))
+    if len(fy_vals_fb) < 2:
         return None  # nicht genug nicht-ueberlappende GJ
-    vals = [ttm_fcf.value] + [v for _, v, _ in fy_vals]
+    vals = [ttm_fcf.value] + [v for _, v, _ in fy_vals_fb]
     return {
         "fcf": sum(vals) / len(vals),
         "years_used": len(vals),
         "quarter_end": ttm_end,
         "sources": ([("TTM", ttm_fcf.value, ttm_fcf.currency)]
-                    + [(f"FY{fy}", v, c) for fy, v, c in fy_vals]),
+                    + [(f"FY{fy}", v, c) for fy, v, c in fy_vals_fb]),
         "currency": ttm_fcf.currency,
+        "sbc_missing": sbc_missing or None,
     }
 
 
@@ -184,23 +196,43 @@ def _ttm_only_fcf_start(m: TickerMetrics) -> dict | None:
             or getattr(m, "ttm_fallback", False)):
         return None
     ttm_fcf = ttm.ttm.get("fcf_sbc")
+    sbc_missing = False
+    if ttm_fcf is None or ttm_fcf.is_na():
+        # v33: TTM ohne SBC -> Fallback auf Roh-FCF TTM
+        ttm_fcf = ttm.ttm.get("fcf")
+        sbc_missing = True
     if ttm_fcf is None or ttm_fcf.is_na():
         return None
-    return {
+    out = {
         "fcf": ttm_fcf.value,
         "years_used": 1,
         "quarter_end": ttm.quarter_end,
         "sources": [("TTM", ttm_fcf.value, ttm_fcf.currency)],
         "currency": ttm_fcf.currency,
     }
+    if sbc_missing:
+        out["sbc_missing"] = True
+    return out
 
 
 def _avg_fcf_start(m: TickerMetrics, n: int) -> dict | None:
-    """Ø FCF-SBC der letzten n Geschaeftsjahre mit Daten (chronologisch)."""
+    """Ø FCF-SBC der letzten n Geschaeftsjahre mit Daten (chronologisch). v33: Fallback auf Roh-FCF ohne SBC."""
     sbc_series = [(fy, m.years[fy]["fcf_sbc"]) for fy in sorted(m.years)
                   if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
     if not sbc_series:
-        return None
+        # v33: Fallback auf Roh-FCF (ohne SBC), sbc_missing=True
+        fcf_series = [(fy, m.years[fy]["fcf"]) for fy in sorted(m.years)
+                      if "fcf" in m.years[fy] and not m.years[fy]["fcf"].is_na()]
+        if not fcf_series:
+            return None
+        last = fcf_series[-n:]
+        return {
+            "fcf": sum(x.value for _, x in last) / len(last),
+            "years_used": len(last),
+            "sources": [(f"FY{fy}", x.value, x.currency) for fy, x in last],
+            "currency": last[-1][1].currency,
+            "sbc_missing": True,
+        }
     last = sbc_series[-n:]
     return {
         "fcf": sum(x.value for _, x in last) / len(last),
@@ -330,7 +362,9 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     if start is None and mode != "latest":
         start = _avg_fcf_start(m, int(dcfg.get("fcf_avg_years", 3)))
     if start is None:
-        return result  # kein FCF nach SBC bestimmbar
+        return result  # kein FCF bestimmbar (weder SBC noch Roh-FCF)
+    result.sbc_missing = bool(start.get("sbc_missing", False))
+    result.fcf_le0 = (start["fcf"] <= 0) if start["fcf"] == start["fcf"] else False
     result.fcf_normalized = start["fcf"]
     result.fcf_years_used = start["years_used"]
     result.fcf_sources = start["sources"]
