@@ -41,6 +41,9 @@ APP_ROW_COLUMNS = {
     "price_to_book", "dividend_yield",
     # v29: EBITDA-Plausibilitaet + Historie (Jahre mit Werten)
     "ebitda_unplausible", "history_years",
+    # v30: Status unter beiden Kandidatenregeln + aktive Regel
+    "status_all", "status_all_detail", "status_recent2", "status_recent2_detail",
+    "mos_recent2", "candidate_mode",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen

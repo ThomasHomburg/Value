@@ -45,10 +45,11 @@ class TtmResult:
     deviation: float = float("nan")  # max. relative Abweichung vs. Jahreswert
     fall_back_to_annual: bool = False
     checks: list[str] = field(default_factory=list)  # pro Kennzahl Abweichung
-    # v26: die 4 letzten Quartale einzeln (Scorecard-Anzeige) —
-    # quarters[0] = neuestes Quartal; Werte: {"operating_cashflow", "capex",
-    # "stock_based_compensation", "fcf_sbc"} in Berichtswährung.
-    quarters: list = field(default_factory=list)  # [{quarter_end, ocf, capex, sbc, fcf_sbc}]
+    # v26: die letzten Quartale einzeln (Scorecard-Anzeige) -- v30: 8 Quartale
+    # (4 aktuelle + 4 Vorjahresquartale fuer YoY). quarters[0] = neuestes Quartal;
+    # Werte: {"operating_cashflow", "capex", "stock_based_compensation",
+    # "fcf_sbc", "yoy"} in Berichtswährung; yoy = FCF-SBC vs. Vorjahresquartal.
+    quarters: list = field(default_factory=list)  # [{quarter_end, ocf, capex, sbc, fcf_sbc, yoy}]
     quarters_currency: str = ""
 
 
@@ -121,10 +122,11 @@ def compute_ttm(m: TickerMetrics, quarterly: dict) -> TtmResult:
     res.quarters_currency = currency
     fy_ttm = last_q.year
 
-    # --- v26: die 4 letzten Quartale einzeln (Scorecard-Anzeige) ------------
-    # Neuestes Quartal zuerst; je Quartal OCF, Capex, SBC, FCF-SBC.
+    # --- v26: die letzten Quartale einzeln (Scorecard-Anzeige); v30: 8 Quartale
+    # (4 aktuelle + 4 Vorjahresquartale fuer YoY). Neuestes Quartal zuerst;
+    # je Quartal OCF, Capex, SBC, FCF-SBC + YoY (FCF-SBC vs. Vorjahresquartal).
     cf_cols = sorted(cf.columns, reverse=True) if cf is not None and not cf.empty else []
-    for c in cf_cols[:4]:
+    for c in cf_cols[:8]:
         q_end = c.date().isoformat() if hasattr(c, "date") else str(c)
         ocf_q = _stock_value(cf, row_map.get("operating_cashflow", []), c)
         capex_q = _stock_value(cf, row_map.get("capex", []), c)
@@ -140,7 +142,15 @@ def compute_ttm(m: TickerMetrics, quarterly: dict) -> TtmResult:
             "capex": capex_q,
             "stock_based_compensation": sbc_q,
             "fcf_sbc": fcf_sbc_q,
+            "yoy": float("nan"),  # wird unten gegen das Vorjahresquartal (i+4) gesetzt
         })
+    # v30: YoY je Quartal -- quarters[i] vs. quarters[i+4] (Vorjahresquartal)
+    for i in range(len(res.quarters)):
+        if i + 4 < len(res.quarters):
+            cur = res.quarters[i]["fcf_sbc"]
+            prev = res.quarters[i + 4]["fcf_sbc"]
+            if cur == cur and prev == prev and prev != 0:
+                res.quarters[i]["yoy"] = cur / prev - 1.0
 
     # --- Flussgroessen: Summe letzte 4 Quartale ---
     src_map = {

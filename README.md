@@ -23,6 +23,11 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v30/v31: candidate_mode (2 Regeln), 8 Quartale + YoY, Matrix nach Status
+- **`dcf.candidate_mode`** (`min_all` Default = Minimum aus allen 4 Modi Ø3J/jüngstes GJ/TTM Ø/TTM; `min_recent2` = Minimum aus jüngstem GJ + TTM). Rangliste zeigt **„Status (alle Modi)“ und „Status (jüngste 2)“** nebeneinander; die aktive Regel (config) ist die Spalte „Status“. Beispiel live: ADBE → alle Modi = Beobachtung (21,0 %), jüngste 2 = Kandidat (36,3 %).
+- **Quartalstabelle (Scorecard)**: 8 Quartale (4 aktuelle + 4 Vorjahresquartale) mit Spalte **„YoY je Quartal“** (FCF−SBC vs. Vorjahresquartal); Summenzeile nur über die 4 aktuellen Quartale (= TTM).
+- **Matrix (Seite 3)**: Farbe nach **Status** (Kandidat grün, Beobachtung blau, sonst grau), x = Quality, **y = MoS (Base), Minimum der Modi, auf −100 % begrenzt**; Hilfslinien bei Quality 60 und MoS 30 % (aus `dcf.buy_quality_min` / `dcf.buy_margin_of_safety_min`); Ziel-Quadrant = Quality ≥ 60 UND MoS ≥ 30 % (grün hinterlegt); Tabelle darunter: Ticker, Status (beide Regeln), Quality, MoS je Modus.
+
 ## v29: Historie-Filter, EBITDA aus Cashflow, Quartals-Summenzeile
 - **Harter Filter "Historie"**: zaehlt Jahre mit tatsaechlichen Werten (nicht Spalten; Kernkennzahlen revenue/ebit/net_income/ocf/equity ungleich NaN), Schwelle `filters.min_history_years` (4). Die Ausschlusstabelle zeigt die gezählten Jahre je Ticker ("Jahre mit Werten").
 - **EBITDA = EBIT + Abschreibungen (D&A)** aus dem Cashflow-Statement (`Depreciation And Amortization`), NICHT das Yahoo/FMP-EBITDA-Feld (weicht teils ab, z. B. UBER FY2025: 6,99 vs. 6,31 Mrd. USD). Fallback: gemeldetes EBITDA, wenn kein D&A gemeldet. EBITDA < EBIT in mind. einem Jahr -> Flag `ebitda:unplausibel` und ND/EBITDA = n/a.

@@ -190,35 +190,47 @@ def _qframes(quarters, ocf_per_q, capex_per_q, sbc_per_q, fcf_per_q=None):
     return {"income": inc, "balance": bal, "cashflow": cf, "row_map": ROW_MAP}
 
 
-def test_ttm_quarters_letzte_4_mit_stichtag():
-    """TtmResult.quarters: 4 neueste Quartale (neuestes zuerst) mit Stichtag."""
+def test_ttm_quarters_letzte_8_mit_stichtag_und_yoy():
+    """v30: TtmResult.quarters: bis zu 8 neueste Quartale (neuestes zuerst),
+    inkl. YoY (FCF-SBC vs. Vorjahresquartal, 4 Quartale zurueck)."""
     quarters = [pd.Timestamp("2026-08-31"), pd.Timestamp("2026-05-31"),
                 pd.Timestamp("2026-02-28"), pd.Timestamp("2025-11-30"),
-                pd.Timestamp("2025-08-31")]
-    ocf = [3e9, 3e9, 3e9, 3e9, 99e9]
-    capex = [-1e9] * 5
-    sbc = [0.5e9] * 5
+                pd.Timestamp("2025-08-31"), pd.Timestamp("2025-05-31"),
+                pd.Timestamp("2025-02-28"), pd.Timestamp("2024-11-30"),
+                pd.Timestamp("2024-08-31")]  # 9 Quartale -> nur 8 uebernommen
+    ocf = [3e9, 3e9, 3e9, 3e9, 99e9, 1e9, 1e9, 1e9, 777e9]
+    capex = [-1e9] * 9
+    sbc = [0.5e9] * 9
     frames = _qframes(quarters, ocf, capex, sbc)
     res = compute_ttm(TickerMetrics(ticker="T"), frames)
-    assert len(res.quarters) == 4
-    # neuestes zuerst; aeltestes (2025-08) nicht enthalten
+    assert len(res.quarters) == 8
+    # neuestes zuerst; das 9. (aelteste, 2024-08) nicht enthalten
     assert res.quarters[0]["quarter_end"] == "2026-08-31"
-    assert res.quarters[-1]["quarter_end"] == "2025-11-30"
+    assert res.quarters[-1]["quarter_end"] == "2024-11-30"
     q0 = res.quarters[0]
     assert q0["operating_cashflow"] == pytest.approx(3e9)
     assert q0["capex"] == pytest.approx(-1e9)
     assert q0["stock_based_compensation"] == pytest.approx(0.5e9)
     assert q0["fcf_sbc"] == pytest.approx(3e9 - 1e9 - 0.5e9)
+    # YoY: quarters[0] vs. quarters[4] -> 1.5e9 / 98.5e9 - 1 (sehr negativ)
+    assert q0["yoy"] == pytest.approx(q0["fcf_sbc"] / res.quarters[4]["fcf_sbc"] - 1.0)
+    # Vorjahresquartale (i >= 4) haben kein YoY (kein i+4 vorhanden)
+    assert res.quarters[4]["yoy"] != res.quarters[4]["yoy"]  # NaN
 
 
 def test_ttm_quarters_fcf_fallback_ocf_plus_capex():
     """Kein gemeldeter FCF -> FCF = OCF + Capex (Capex negativ)."""
     quarters = [pd.Timestamp("2026-08-31"), pd.Timestamp("2026-05-31"),
-                pd.Timestamp("2026-02-28"), pd.Timestamp("2025-11-30")]
-    frames = _qframes(quarters, [3e9] * 4, [-1e9] * 4, [0.5e9] * 4,
-                      fcf_per_q=[float("nan")] * 4)
+                pd.Timestamp("2026-02-28"), pd.Timestamp("2025-11-30"),
+                pd.Timestamp("2025-08-31"), pd.Timestamp("2025-05-31"),
+                pd.Timestamp("2025-02-28"), pd.Timestamp("2024-11-30")]
+    frames = _qframes(quarters, [3e9] * 8, [-1e9] * 8, [0.5e9] * 8,
+                      fcf_per_q=[float("nan")] * 8)
     res = compute_ttm(TickerMetrics(ticker="T"), frames)
+    assert len(res.quarters) == 8
     assert res.quarters[0]["fcf_sbc"] == pytest.approx(3e9 - 1e9 - 0.5e9)
+    # YoY bei gleichem Niveau = 0 %
+    assert res.quarters[0]["yoy"] == pytest.approx(0.0)
 
 
 # --- (4) SEC-EDGAR-Abgleich -----------------------------------------------------

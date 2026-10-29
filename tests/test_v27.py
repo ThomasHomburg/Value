@@ -163,7 +163,7 @@ def test_status_kandidat_mit_entscheidendem_modus(cfg):
     assert out["dcf"].is_buy
     assert "Kandidat" in row["kandidat"] or row["kandidat"] == "ja"
     # Entscheidender Modus wird genannt (Minimum bei Modus ...)
-    assert "Minimum bei Modus" in row["status_detail"]
+    assert "bei Modus" in row["status_detail"]
     assert "kauf" in row["flags"]
 
 

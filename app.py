@@ -144,6 +144,10 @@ def page_ranking() -> None:
     view["MoS TTM"] = view["mos_ttm_only"].map(_fmt_pct)
     # v27: Zwei Stufen -- Kandidat / Beobachtung (mit entscheidendem Modus)
     view["Status"] = view["status"].map(lambda v: str(v))
+    # v30: Status unter beiden Kandidatenregeln nebeneinander
+    # (candidate_mode aus config.yaml bestimmt die aktive Regel = Spalte "Status")
+    view["Status (alle Modi)"] = view["status_all"].map(lambda v: str(v))
+    view["Status (jüngste 2)"] = view["status_recent2"].map(lambda v: str(v))
     # v28: SEC-EDGAR-Abgleich in der Rangliste sichtbar (US-Ticker)
     def _sec_col(r):
         if r["sec_check_flag"]:
@@ -170,7 +174,8 @@ def page_ranking() -> None:
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
                  "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM", "MoS alt. ND",
-                 "MoS Bear", "MoS Bull", "Status", "Kandidat", "SEC", "Flags"]
+                 "MoS Bear", "MoS Bull", "Status", "Status (alle Modi)", "Status (jüngste 2)",
+                 "Kandidat", "SEC", "Flags"]
     # v27: Standard-Sortierung: Kandidat zuerst, dann Beobachtung, dann MoS (Base) absteigend
     view["_kauf"] = (view["Status"] == "Kandidat").astype(int)
     view["_watch"] = (view["Status"] == "Beobachtung").astype(int)
@@ -505,38 +510,46 @@ def page_scorecard() -> None:
     st.subheader("DCF – Innerer Wert je Aktie (3 Szenarien)")
     dcf_section(m, res["row"])
 
-    # v26: die vier letzten Quartale (OCF, Capex, SBC, FCF − SBC) mit Stichtag
+    # v26: die letzten Quartale (OCF, Capex, SBC, FCF − SBC) mit Stichtag;
+    # v30: 8 Quartale (4 aktuelle + 4 Vorjahresquartale) + YoY je Quartal
     ttm_obj = getattr(m, "ttm", None)
     if ttm_obj is not None and getattr(ttm_obj, "quarters", None):
-        st.subheader("Letzte 4 Quartale (Cashflow, mit Stichtag)")
+        st.subheader("Letzte 8 Quartale (Cashflow, mit Stichtag und YoY)")
         q_rows = []
         cur_q = ttm_obj.quarters_currency or "n/a"
         for q in ttm_obj.quarters:  # neuestes Quartal zuerst
             def _qb(v) -> str:
                 return "n/a" if v != v else f"{v / 1e9:,.2f}"
+            def _qp(v) -> str:
+                return "n/a" if v != v else f"{v:+.1%}"
             q_rows.append({
                 "Quartal (Stichtag)": q["quarter_end"],
                 f"OCF (Mrd. {cur_q})": _qb(q["operating_cashflow"]),
                 f"Capex (Mrd. {cur_q})": _qb(q["capex"]),
                 f"SBC (Mrd. {cur_q})": _qb(q["stock_based_compensation"]),
                 f"FCF − SBC (Mrd. {cur_q})": _qb(q["fcf_sbc"]),
+                "YoY je Quartal (FCF − SBC)": _qp(q.get("yoy", float("nan"))),
             })
-        # v29: Summenzeile -- muss dem TTM entsprechen
+        # v29: Summenzeile ueber die 4 AKTUELLEN Quartale -- muss dem TTM entsprechen
         def _qs(*vals) -> str:
             if all(v == v for v in vals):
                 return f"{sum(vals) / 1e9:,.2f}"
             return "n/a"
+        q4 = ttm_obj.quarters[:4]
         q_rows.append({
-            "Quartal (Stichtag)": "Summe (= TTM)",
-            f"OCF (Mrd. {cur_q})": _qs(*[q["operating_cashflow"] for q in ttm_obj.quarters]),
-            f"Capex (Mrd. {cur_q})": _qs(*[q["capex"] for q in ttm_obj.quarters]),
-            f"SBC (Mrd. {cur_q})": _qs(*[q["stock_based_compensation"] for q in ttm_obj.quarters]),
-            f"FCF − SBC (Mrd. {cur_q})": _qs(*[q["fcf_sbc"] for q in ttm_obj.quarters]),
+            "Quartal (Stichtag)": "Summe 4 akt. (= TTM)",
+            f"OCF (Mrd. {cur_q})": _qs(*[q["operating_cashflow"] for q in q4]),
+            f"Capex (Mrd. {cur_q})": _qs(*[q["capex"] for q in q4]),
+            f"SBC (Mrd. {cur_q})": _qs(*[q["stock_based_compensation"] for q in q4]),
+            f"FCF − SBC (Mrd. {cur_q})": _qs(*[q["fcf_sbc"] for q in q4]),
+            "YoY je Quartal (FCF − SBC)": "n/a",
         })
         st.dataframe(pd.DataFrame(q_rows), width="stretch", hide_index=True)
         st.caption(f"Einheit: Mrd. {cur_q}; Stichtag = Quartalsende. "
                    f"FCF − SBC = (OCF − |Capex|) − Aktienvergütung; "
-                   f"Summenzeile der 4 Quartale = TTM (Basis „{ttm_obj.base_label}“).")
+                   f"YoY = FCF − SBC vs. Vorjahresquartal (4 Quartale zurueck). "
+                   f"Summenzeile der 4 aktuellen Quartale = TTM (Basis „{ttm_obj.base_label}“); "
+                   f"die 4 Vorjahresquartale (Zeilen 5–8) dienen nur dem YoY-Vergleich.")
 
     # Jahres-Charts
     st.subheader("Kennzahlen im Zeitverlauf (5 Jahre)")
@@ -1037,93 +1050,136 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
 # --- Seite 3: Matrix (Quality vs. Value) -------------------------------------
 
 def page_matrix() -> None:
-    """Streudiagramm Quality (x) vs. Value (y); Punkte mit Ticker beschriftet.
+    """v31: Streudiagramm Quality (x) vs. MoS Base (y = Minimum der Modi).
 
-    Quadrant oben rechts (Quality >= Median, Value >= Median) hervorgehoben --
-    dort liegen die interessantesten Kandidaten (hohe Qualitaet UND guenstige
-    Bewertung).
+    Farbe nach Status: Kandidat gruen, Beobachtung blau, sonst grau.
+    y-Achse auf -100 % begrenzt. Hilfslinien bei Quality = buy_quality_min und
+    MoS = buy_margin_of_safety_min (aus config.yaml). Ziel-Quadrant =
+    Quality >= Schwelle UND MoS >= Schwelle; Tabelle darunter mit Ticker,
+    Status, Quality und MoS je Modus.
     """
-    st.header("Matrix: Quality vs. Value")
+    st.header("Matrix: Quality vs. MoS (Base)")
     rows = st.session_state["rows"]
     if not rows:
         st.info("Keine Ticker zum Anzeigen.")
         return
 
     df = pd.DataFrame(rows)
-    df = df.dropna(subset=["quality", "value"])
+    df = df.dropna(subset=["quality"])
     if df.empty:
-        st.info("Keine Ticker mit Quality- und Value-Score verfuegbar.")
+        st.info("Keine Ticker mit Quality-Score verfuegbar.")
         return
 
-    med_q = float(df["quality"].median())
-    med_v = float(df["value"].median())
+    dcfg = CFG["dcf"]
+    q_min = float(dcfg.get("buy_quality_min", 60))
+    mos_min = float(dcfg.get("buy_margin_of_safety_min", 0.30))
+
+    # y-Achse: MoS Base = Minimum der Modi (mos_rule), auf -100 % begrenzt
+    def _mos_axis(r):
+        v = r.get("mos_rule")
+        if v != v:
+            v = r.get("margin_of_safety", float("nan"))
+        if v != v:
+            return float("nan")
+        return max(v, -1.0)
+    df["mos_axis"] = df.apply(_mos_axis, axis=1)
+    df = df.dropna(subset=["mos_axis"])
+    if df.empty:
+        st.info("Keine Ticker mit MoS verfuegbar.")
+        return
+
+    # v31: Farbe nach Status (aktive Regel = Spalte "status")
+    def _status_color(r):
+        if r.get("status") == "Kandidat":
+            return "Kandidat"
+        if r.get("status") == "Beobachtung":
+            return "Beobachtung"
+        return "nein"
+    df["status_cat"] = df.apply(_status_color, axis=1)
+    color_scale = alt.Scale(domain=["Kandidat", "Beobachtung", "nein"],
+                            range=["#2e7d32", "#1565c0", "#9e9e9e"])
 
     base = alt.Chart(df).encode(
         x=alt.X("quality:Q", title="Quality-Score (0–100)", scale=alt.Scale(domain=[0, 100])),
-        y=alt.Y("value:Q", title="Value-Score (0–100)", scale=alt.Scale(domain=[0, 100])),
+        y=alt.Y("mos_axis:Q", title="MoS (Base), Minimum der Modi (−100 % begrenzt)",
+                scale=alt.Scale(domain=[-1.0, 1.0]), axis=alt.Axis(format="%")),
         tooltip=[
             alt.Tooltip("ticker:N", title="Ticker"),
             alt.Tooltip("name:N", title="Name"),
+            alt.Tooltip("status:N", title="Status"),
+            alt.Tooltip("status_all:N", title="Status (alle Modi)"),
+            alt.Tooltip("status_recent2:N", title="Status (juengste 2)"),
             alt.Tooltip("quality:Q", title="Quality", format=".1f"),
-            alt.Tooltip("value:Q", title="Value", format=".1f"),
-            alt.Tooltip("score:Q", title="Score", format=".1f"),
-            alt.Tooltip("coverage:Q", title="Datenabdeckung", format=".1%"),
+            alt.Tooltip("mos_axis:Q", title="MoS (min der Modi)", format=".1%"),
+            alt.Tooltip("mos_avg3:Q", title="MoS O3J", format=".1%"),
+            alt.Tooltip("mos_latest:Q", title="MoS juengstes GJ", format=".1%"),
+            alt.Tooltip("mos_ttm:Q", title="MoS TTM O", format=".1%"),
+            alt.Tooltip("mos_ttm_only:Q", title="MoS TTM", format=".1%"),
             alt.Tooltip("sector:N", title="Sektor"),
         ],
     )
 
-    # Quadrant oben rechts hervorheben (Rechteck hinter den Punkten)
+    # Ziel-Quadrant: Quality >= q_min UND MoS >= mos_min (Rechteck hinter den Punkten)
     quadrant = alt.Chart(pd.DataFrame([{
-        "x0": med_q, "x1": 100, "y0": med_v, "y1": 100,
+        "x0": q_min, "x1": 100, "y0": mos_min, "y1": 1.0,
     }])).mark_rect(color="#2e7d32", opacity=0.12).encode(
         x=alt.X("x0:Q"), x2=alt.X2("x1:Q"),
         y=alt.Y("y0:Q"), y2=alt.Y2("y1:Q"),
     )
 
-    # Mittellinien (Median)
-    vline = alt.Chart(pd.DataFrame([{"x": med_q}])).mark_rule(
-        color="#888", strokeDash=[4, 4]).encode(x="x:Q")
-    hline = alt.Chart(pd.DataFrame([{"y": med_v}])).mark_rule(
-        color="#888", strokeDash=[4, 4]).encode(y="y:Q")
+    # Hilfslinien aus config.yaml
+    vline = alt.Chart(pd.DataFrame([{"x": q_min}])).mark_rule(
+        color="#2e7d32", strokeDash=[6, 4]).encode(x="x:Q")
+    hline = alt.Chart(pd.DataFrame([{"y": mos_min}])).mark_rule(
+        color="#2e7d32", strokeDash=[6, 4]).encode(y="y:Q")
+    vline_lbl = alt.Chart(pd.DataFrame([{"x": q_min, "y": 0.98}])).mark_text(
+        text=f"Quality {q_min:.0f}", color="#2e7d32", dx=4, dy=-6, fontSize=11).encode(
+        x="x:Q", y="y:Q")
+    hline_lbl = alt.Chart(pd.DataFrame([{"x": 1, "y": mos_min}])).mark_text(
+        text=f"MoS {mos_min:.0%}", color="#2e7d32", dx=4, dy=-4, fontSize=11).encode(
+        x="x:Q", y="y:Q")
 
     points = base.mark_circle(size=140, opacity=0.85).encode(
-        color=alt.condition(
-            (alt.datum.quality >= med_q) & (alt.datum.value >= med_v),
-            alt.value("#2e7d32"),   # oben rechts: gruen
-            alt.value("#9e9e9e"),   # sonst: grau
-        ),
+        color=alt.Color("status_cat:N", title="Status", scale=color_scale),
     )
     labels = base.mark_text(dx=8, dy=-8, fontSize=11, fontWeight="bold").encode(
         text="ticker:N",
     )
 
-    chart = (quadrant + vline + hline + points + labels).properties(
+    chart = (quadrant + vline + hline + vline_lbl + hline_lbl + points + labels).properties(
         width=720, height=560,
-        title=f"Quality vs. Value (Median: Q={med_q:.1f}, V={med_v:.1f})",
+        title=f"Quality vs. MoS (Base) – Ziel-Quadrant: Quality ≥ {q_min:.0f} UND MoS ≥ {mos_min:.0%}",
     ).interactive()
     st.altair_chart(chart, use_container_width=True)
 
-    st.caption("Oben rechts (gruen): hohe Qualitaet UND guenstige Bewertung – "
-               "bevorzugte Kaufkandidaten. Gestrichelte Linien = Median. "
-               f"{int((df['quality'] >= med_q).sum() & (df['value'] >= med_v).sum())} "
-               f"Ticker im Ziel-Quadranten.")
+    n_target = int(((df["quality"] >= q_min) & (df["mos_axis"] >= mos_min)).sum())
+    st.caption("Farbe nach Status: gruen = Kandidat, blau = Beobachtung, grau = nein. "
+               "Ziel-Quadrant oben rechts (gruen hinterlegt): Quality ≥ "
+               f"{q_min:.0f} UND MoS ≥ {mos_min:.0%} (aus config.yaml). "
+               f"{n_target} Ticker im Ziel-Quadranten. y-Achse = MoS (Base), Minimum der "
+               "Startwert-Modi, auf −100 % begrenzt.")
 
-    # Tabelle der Ticker im Ziel-Quadranten
-    target = df[(df["quality"] >= med_q) & (df["value"] >= med_v)].sort_values(
-        "score", ascending=False)
-    if not target.empty:
-        st.subheader("Ziel-Quadrant (Quality ≥ Median UND Value ≥ Median)")
-        tview = target[["ticker", "name", "quality", "value", "score", "coverage", "sector"]].copy()
-        tview["quality"] = tview["quality"].map(lambda v: f"{v:.1f}")
-        tview["value"] = tview["value"].map(lambda v: f"{v:.1f}")
-        tview["score"] = tview["score"].map(lambda v: f"{v:.1f}")
-        tview["coverage"] = tview["coverage"].map(lambda v: "n/a" if (v != v) else f"{v:.1%}")
-        st.dataframe(
-            tview.rename(columns={"ticker": "Ticker", "name": "Name", "quality": "Quality",
-                                  "value": "Value", "score": "Score", "coverage": "Datenabdeckung",
-                                  "sector": "Sektor"}),
-            width="stretch", hide_index=True,
-        )
+    # Tabelle darunter: Ticker, Status, Quality, MoS je Modus (Ziel-Quadrant zuerst)
+    target = df[(df["quality"] >= q_min) & (df["mos_axis"] >= mos_min)].copy()
+    rest = df[~((df["quality"] >= q_min) & (df["mos_axis"] >= mos_min))].copy()
+    out_df = pd.concat([target, rest])
+    out_df["_ziel"] = ((out_df["quality"] >= q_min) & (out_df["mos_axis"] >= mos_min)).astype(int)
+    out_df = out_df.sort_values(["_ziel", "mos_axis"], ascending=[False, False])
+    tview = out_df[["ticker", "name", "status", "status_all", "status_recent2", "quality",
+                    "mos_rule", "mos_avg3", "mos_latest", "mos_ttm", "mos_ttm_only"]].copy()
+    for c in ("mos_rule", "mos_avg3", "mos_latest", "mos_ttm", "mos_ttm_only"):
+        tview[c] = tview[c].map(lambda v: "n/a" if (v != v) else f"{v:.1%}")
+    tview["quality"] = tview["quality"].map(lambda v: f"{v:.1f}")
+    st.subheader("Alle Ticker: Status, Quality, MoS je Modus (Ziel-Quadrant zuerst)")
+    st.dataframe(
+        tview.rename(columns={
+            "ticker": "Ticker", "name": "Name", "status": "Status",
+            "status_all": "Status (alle Modi)", "status_recent2": "Status (juengste 2)",
+            "quality": "Quality", "mos_rule": "MoS (min der Modi)",
+            "mos_avg3": "MoS O3J", "mos_latest": "MoS juengstes GJ",
+            "mos_ttm": "MoS TTM O", "mos_ttm_only": "MoS TTM"}),
+        width="stretch", hide_index=True,
+    )
 
 
 # --- Seite 4: Import ---------------------------------------------------------

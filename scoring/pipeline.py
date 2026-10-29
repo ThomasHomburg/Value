@@ -135,26 +135,52 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     #   (Bear spielt fuer die Beobachtungsliste keine Rolle.)
     mode_names = {"avg3": "Ø3J", "latest": "jüngstes GJ",
                   "ttm": "TTM Ø", "ttm_only": "TTM"}
-    status = "nein"
-    status_detail = ""
+
+    def _status_for(mos_rule_val: float, modes_for_rule: list[tuple[str, float]],
+                    is_buy_flag: bool) -> tuple[str, str]:
+        """Status (Kandidat/Beobachtung/nein) fuer eine Kandidatenregel (v30:
+        dieselbe Logik fuer 'alle Modi' und 'juengste 2 Modi')."""
+        if is_buy_flag:
+            st = "Kandidat"
+            detail = ""
+            if modes_for_rule:
+                min_val = min(v for _, v in modes_for_rule)
+                deciding = [mode_names.get(k, k) for k, v in modes_for_rule if v == min_val]
+                detail = (f"entscheidend: Minimum {mos_rule_val:.1%} "
+                          f"(bei Modus {', '.join(deciding)})"
+                          if mos_rule_val == mos_rule_val else "")
+            return st, detail
+        if (quality_ok_global and mos_rule_val == mos_rule_val and mos_rule_val < mos_min
+                and modes_for_rule):
+            best_mode, best_val = max(modes_for_rule, key=lambda kv: kv[1])
+            if best_val >= watch_min:
+                return "Beobachtung", (f"bester Modus {mode_names.get(best_mode, best_mode)} "
+                                        f"{best_val:.1%} ≥ {watch_min:.0%}, "
+                                        f"aber min {mos_rule_val:.1%} < {mos_min:.0%}")
+        return "nein", ""
+
     mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
+    mos_vals_global = mos_vals
     quality_ok = result["quality"] == result["quality"] and result["quality"] >= quality_min
-    if dcf.is_buy:
-        status = "Kandidat"
-        if mos_mode == "min" and mos_vals:
-            min_val = min(v for _, v in mos_vals)
-            deciding = [mode_names.get(k, k) for k, v in mos_vals if v == min_val]
-            status_detail = f"entscheidend: MoS {mode_names.get(mos_mode, mos_mode)} " \
-                f"{mos_rule:.1%} (Minimum bei Modus {', '.join(deciding)})" if mos_rule == mos_rule else ""
-        elif mos_rule == mos_rule:
-            status_detail = f"entscheidend: MoS {mode_names.get(mos_mode, mos_mode)} {mos_rule:.1%}"
-    elif (quality_ok and mos_rule == mos_rule and mos_rule < mos_min and mos_vals):
-        best_mode, best_val = max(mos_vals, key=lambda kv: kv[1])
-        if best_val >= watch_min:
-            status = "Beobachtung"
-            status_detail = (f"bester Modus {mode_names.get(best_mode, best_mode)} "
-                             f"{best_val:.1%} ≥ {watch_min:.0%}, "
-                             f"aber min {mos_rule:.1%} < {mos_min:.0%}")
+    quality_ok_global = quality_ok
+    status, status_detail = _status_for(mos_rule, mos_vals, dcf.is_buy)
+
+    # v30: zweite Regel -- Minimum aus den juengsten 2 Modi (juengstes GJ + TTM rein)
+    dc_candidate_mode = str(dc.get("candidate_mode", "min_all")).lower()
+    recent2 = [(k, v) for k, v in mos_vals if k in ("latest", "ttm_only")]
+    mos_recent2 = min(v for _, v in recent2) if recent2 else float("nan")
+    if dc_candidate_mode == "min_recent2":
+        # aktive Regel = juengste 2
+        status, status_detail = _status_for(
+            mos_recent2, recent2,
+            is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
+        status_all, status_all_detail = _status_for(mos_rule, mos_vals, dcf.is_buy)
+        status_recent2, status_recent2_detail = status, status_detail
+    else:
+        # Default min_all: aktive Regel = alle Modi
+        status_all, status_all_detail = status, status_detail
+        is_buy_recent2 = is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2)
+        status_recent2, status_recent2_detail = _status_for(mos_recent2, recent2, is_buy_recent2)
 
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
@@ -250,6 +276,13 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         # v27: Zwei Stufen -- Kandidat / Beobachtung (+ Detail, welcher Modus entscheidet)
         "status": status,
         "status_detail": status_detail,
+        # v30: Status unter beiden Kandidatenregeln nebeneinander + aktive Regel
+        "status_all": status_all,
+        "status_all_detail": status_all_detail,
+        "status_recent2": status_recent2,
+        "status_recent2_detail": status_recent2_detail,
+        "mos_recent2": mos_recent2,
+        "candidate_mode": dc_candidate_mode,
         # v26: MoS (Base) mit alternativer Nettoverschuldung
         "mos_base_alt_nd": dcf.mos_base_alt,
         "dcf_net_debt_mode": dcf.net_debt_mode,

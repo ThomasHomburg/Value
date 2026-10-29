@@ -300,6 +300,10 @@ dcf:
                               # incl_sti (Schulden - (Cash + kurzfr. Anlagen))
   mos_min_mode: min           # Kandidatenregel MoS: min (Minimum der 4 Startwert-MoS)
                               # | avg3 | latest | ttm | ttm_only | auto (wie fcf_mode)
+  # v30: welche Modi die Kandidatenregel nutzt (Status-Spalten nebeneinander):
+  #   min_all     = Minimum aus allen 4 Modi (O3J, juengstes GJ, TTM O, TTM) -- Default
+  #   min_recent2 = Minimum aus den juengsten 2 Modi (juengstes GJ + TTM rein)
+  candidate_mode: min_all
   buy_quality_min: 60         # Kaufkandidat: Quality-Score >= 60 (statt Gesamtscore)
   buy_margin_of_safety_min: 0.30
   buy_bear_floor: 0.80
