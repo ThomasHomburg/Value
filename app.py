@@ -144,10 +144,13 @@ def page_ranking() -> None:
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
     view["MoS (Base)"] = view["margin_of_safety"].map(_fmt_pct)   # DCF, Build-Schritt 6
-    # v26: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø)
+    # v27: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø / TTM)
     view["MoS Ø3J"] = view["mos_avg3"].map(_fmt_pct)
     view["MoS jüngstes GJ"] = view["mos_latest"].map(_fmt_pct)
     view["MoS TTM Ø"] = view["mos_ttm"].map(_fmt_pct)
+    view["MoS TTM"] = view["mos_ttm_only"].map(_fmt_pct)
+    # v27: Zwei Stufen -- Kandidat / Beobachtung (mit entscheidendem Modus)
+    view["Status"] = view["status"].map(lambda v: str(v))
     # v26: MoS (Base) mit alternativer Nettoverschuldung
     view["MoS alt. ND"] = view["mos_base_alt_nd"].map(_fmt_pct)
     view["MoS Bear"] = view["mos_bear"].map(_fmt_pct)
@@ -160,12 +163,13 @@ def page_ranking() -> None:
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
-                 "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS alt. ND",
-                 "MoS Bear", "MoS Bull", "Kandidat", "Flags"]
-    # Standard-Sortierung: Kaufkandidat zuerst, dann MoS (Base) absteigend
-    view["_kauf"] = (view["Kandidat"] == "ja").astype(int)
+                 "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM", "MoS alt. ND",
+                 "MoS Bear", "MoS Bull", "Status", "Kandidat", "Flags"]
+    # v27: Standard-Sortierung: Kandidat zuerst, dann Beobachtung, dann MoS (Base) absteigend
+    view["_kauf"] = (view["Status"] == "Kandidat").astype(int)
+    view["_watch"] = (view["Status"] == "Beobachtung").astype(int)
     view["_mos"] = pd.to_numeric(view["MoS (Base)"].str.replace("n/a", "").str.rstrip("%"), errors="coerce")
-    view = view.sort_values(["_kauf", "_mos"], ascending=[False, False])
+    view = view.sort_values(["_kauf", "_watch", "_mos"], ascending=[False, False, False])
     view = view[show_cols]
     st.caption(f"{len(view)} bewertet, {len(excluded)} ausgeschlossen "
                f"({total_tickers} Ticker gesamt, {len(view)} nach Filter)")
@@ -177,6 +181,10 @@ def page_ranking() -> None:
     buys = sorted(df[df["is_buy"]]["ticker"].tolist()) if "is_buy" in df.columns else []
     if buys:
         st.success("Kaufkandidaten: " + ", ".join(buys))
+    if "status" in df.columns:
+        watch = sorted(df[df["status"] == "Beobachtung"]["ticker"].tolist())
+        if watch:
+            st.info("Beobachtungsliste: " + ", ".join(watch))
     # Zeileninhalt umbrechen (lange Namen/Flags), Name-Spalte breiter
     styler = view.style.set_table_styles([
         {"selector": "th", "props": [("white-space", "nowrap")]},
@@ -207,6 +215,8 @@ def page_ranking() -> None:
         "MoS Ø3J": st.column_config.TextColumn("MoS Ø3J", help="MoS (Base) mit Start-FCF = Ø letzte 3 Geschäftsjahre (nach SBC)"),
         "MoS jüngstes GJ": st.column_config.TextColumn("MoS jüngstes GJ", help="MoS (Base) mit Start-FCF = jüngstes Geschäftsjahr (nach SBC)"),
         "MoS TTM Ø": st.column_config.TextColumn("MoS TTM Ø", help="MoS (Base) mit Start-FCF = Ø TTM + 2 nicht überlappende GJ (nach SBC)"),
+        "MoS TTM": st.column_config.TextColumn("MoS TTM", help="MoS (Base) mit Start-FCF = reiner TTM-Start (Summe letzte 4 Quartale, nach SBC, ohne Ø)"),
+        "Status": st.column_config.TextColumn("Status", help="Zwei Stufen: Kandidat (MoS min ≥ 30 %, Quality ≥ 60, Bear ≥ 80 % Kurs) oder Beobachtung (bester Modus ≥ 30 %, aber min < 30 %, Quality ≥ 60); Kandidat nennt den entscheidenden Modus"),
         "MoS alt. ND": st.column_config.TextColumn("MoS alt. ND", help="MoS (Base) mit alternativer Nettoverschuldung (anderer Modus: gemeldet vs. Schulden − (Cash + kurzfr. Anlagen))"),
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
@@ -352,14 +362,20 @@ def page_scorecard() -> None:
     def _fmt_abs(v: float) -> str:
         return "n/a" if (v != v) else f"{v / 1e9:,.2f} Mrd. {cur}"
 
+    _tmin = CFG.get("data", {}).get("tax_rate_min", 0.0)
+    _tmax = CFG.get("data", {}).get("tax_rate_max", 0.35)
+    _tnorm = CFG.get("data", {}).get("tax_rate_norm", 0.21)
     st.markdown(
         "**Formel:** ROIC = NOPAT / investiertes Kapital =  "
         "EBIT × (1 − Steuersatz) / (Eigenkapital + Nettoverschuldung), "
         "Kapitalbasis jeweils zum Jahresende des Geschaeftsjahres. "
+        f"Steuersatz = Steueraufwand / Vorsteuergewinn, begrenzt auf {_tmin:.0%}–{_tmax:.0%}; "
+        f"ausserhalb davon und bei Vorsteuerverlust gilt der Normsteuersatz {_tnorm:.0%} "
+        "(config.yaml `data.tax_rate_*`). Bei EBIT ≤ 0 ist NOPAT = EBIT."
     )
     roic_rows = pd.DataFrame([
         {"Komponente": "EBIT (Operating Income)", "Wert": _fmt_abs(ebit_m.value) if ebit_m else "n/a", "Jahr": latest_fy},
-        {"Komponente": "Steuersatz (Steueraufwand / Vorsteuergewinn)", "Wert": "n/a" if tax != tax else f"{tax:.1%}", "Jahr": latest_fy},
+        {"Komponente": f"Steuersatz (begrenzt {_tmin:.0%}–{_tmax:.0%}, sonst Norm {_tnorm:.0%})", "Wert": "n/a" if tax != tax else f"{tax:.1%}", "Jahr": latest_fy},
         {"Komponente": "NOPAT = EBIT × (1 − Steuersatz)", "Wert": _fmt_abs(np_), "Jahr": latest_fy},
         {"Komponente": "Investiertes Kapital = EK + Nettoverschuldung", "Wert": _fmt_abs(ic), "Jahr": latest_fy},
         {"Komponente": "ROIC = NOPAT / investiertes Kapital", "Wert": "n/a" if roic_val != roic_val else f"{roic_val:.1%}", "Jahr": latest_fy},
@@ -763,7 +779,8 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     for name in ("Bear", "Base", "Bull"):
         sc = dcf.scenarios.get(name.lower())
         g5_val = sc.growth_rates[0] if sc else float("nan")
-        basis_short = ("TTM Ø" if dcf.fcf_basis == "ttm" else "Ø GJ")
+        basis_short = ("TTM" if dcf.fcf_mode == "ttm_only"
+                       else ("TTM Ø" if dcf.fcf_basis == "ttm" else "Ø GJ"))
         ann_rows.append({
             "Szenario": name,
             f"Start-FCF nach SBC ({basis_short})": f"{dcf.fcf_normalized_conv / 1e9:,.2f} Mrd. {cur}",
@@ -777,8 +794,12 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     if dcf.fcf_basis == "ttm" and dcf.ttm_quarter_end:
         basis_label = f"TTM bis {dcf.ttm_quarter_end[:7]} (Stichtag {dcf.ttm_quarter_end})"
         src_labels = " + ".join(name for name, _, _ in dcf.fcf_sources)
-        basis_note = (f"**Basis: {basis_label}** — Ø aus {src_labels} "
-                      f"(TTM + nicht überlappende Geschäftsjahre)")
+        if dcf.fcf_mode == "ttm_only":
+            basis_note = (f"**Basis: {basis_label}** — reiner TTM-Start "
+                          f"(Summe letzte 4 Quartale, ohne Ø; Quelle: {src_labels})")
+        else:
+            basis_note = (f"**Basis: {basis_label}** — Ø aus {src_labels} "
+                          f"(TTM + nicht überlappende Geschäftsjahre)")
     else:
         src_labels = " + ".join(name for name, _, _ in dcf.fcf_sources) if dcf.fcf_sources else ""
         basis_note = (f"Basis: Geschäftsjahre (Ø letzte {dcf.fcf_years_used} Jahre"
@@ -885,11 +906,11 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
                "kurzfristige Anlagen); jeweils ohne Kundengelder). "
                "Beide MoS (Base) nebeneinander; '●' markiert die aktive Variante.")
 
-    # --- Startwert umschaltbar: O3J / juengstes GJ / TTM -> MoS Base nebeneinander ---
+    # --- v27: Startwert umschaltbar: O3J / juengstes GJ / TTM O / TTM -> MoS Base nebeneinander ---
     st.markdown("**Startwert (umschaltbar): MoS (Base) je FCF-Modus**")
     mode_rows = []
     for mode, label in (("avg3", "Ø letzte 3 GJ"), ("latest", "Jüngstes GJ"),
-                        ("ttm", "TTM (4 Quartale)")):
+                        ("ttm", "TTM Ø (TTM + 2 GJ)"), ("ttm_only", "TTM (4 Quartale, ohne Ø)")):
         dcf_m = compute_dcf(m, CFG, fcf_mode=mode)
         base_m = dcf_m.scenarios.get("base")
         mos_m = dcf_m.margin_of_safety
@@ -900,8 +921,8 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
         mode_rows.append({
             "Modus": label,
             "Basis": basis_m,
-            "Start-FCF n. SBC (Mrd.)": "n/a" if dcf_m.fcf_normalized != dcf_m.fcf_normalized
-            else f"{dcf_m.fcf_normalized_conv / 1e9:,.2f} {cur}",
+            f"Start-FCF n. SBC (Mrd. {cur})": "n/a" if dcf_m.fcf_normalized != dcf_m.fcf_normalized
+            else f"{dcf_m.fcf_normalized_conv / 1e9:,.2f}",
             "Wert je Aktie (Base)": "n/a" if vps_m != vps_m else f"{vps_m:,.2f} {cur}",
             "Kurs": "n/a" if price is None else f"{price:,.2f} {cur}",
             "MoS (Base)": "n/a" if mos_m != mos_m else f"{mos_m:.1%}",
@@ -910,7 +931,8 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
     st.dataframe(pd.DataFrame(mode_rows), width="stretch", hide_index=True)
     st.caption("Startwert des DCF umschaltbar (config.yaml `dcf.fcf_mode`, Default 'auto': "
                "TTM falls plausibel, sonst Ø letzte 3 GJ). '●' markiert den aktiven Modus. "
-               "MoS (Base) = 1 − Kurs / Wert je Aktie (Base) je Modus.")
+               "MoS (Base) = 1 − Kurs / Wert je Aktie (Base) je Modus. "
+               "Einheit Start-FCF: Mrd. in Marktkapitalisierungs-Währung.")
 
     # --- Sensitivitaetstabelle: MoS (Base) ueber Diskontsatz x Terminal Growth ---
     st.markdown("**Sensitivität: MoS (Base) je Aktie**")

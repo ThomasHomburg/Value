@@ -1,7 +1,10 @@
 """Abgeleitete Kennzahlen mit dokumentierten Formeln.
 
 Formeln (Kapitalbasis jeweils Ende des Geschaeftsjahres):
-- NOPAT = EBIT * (1 - Steuersatz); Steuersatz = Steueraufwand / Vorsteuergewinn.
+- NOPAT = EBIT * (1 - Steuersatz); Steuersatz = Steueraufwand / Vorsteuergewinn,
+  begrenzt auf 0-35 % (config.yaml `data.tax_rate_min/max`); ausserhalb davon
+  und bei Vorsteuerverlust gilt der Normsteuersatz (`data.tax_rate_norm`, 21 %).
+  Bei EBIT <= 0 ist NOPAT = EBIT (kein Steuervorteil im Verlustjahr).
 - Investiertes Kapital = Eigenkapital + Nettoverschuldung.
 - ROIC = NOPAT / investiertes Kapital.
 - FCF-Yield = FCF / Marktkapitalisierung.
@@ -15,6 +18,25 @@ from __future__ import annotations
 import math
 
 from .loader import TickerMetrics
+
+_TAX_CFG = None
+
+
+def _tax_bounds() -> tuple[float, float, float]:
+    """(tax_rate_min, tax_rate_max, tax_rate_norm) aus config.yaml (Block `data`)."""
+    global _TAX_CFG
+    if _TAX_CFG is None:
+        try:
+            from config import load_config
+            d = load_config().get("data", {})
+        except Exception:
+            d = {}
+        _TAX_CFG = (
+            float(d.get("tax_rate_min", 0.0)),
+            float(d.get("tax_rate_max", 0.35)),
+            float(d.get("tax_rate_norm", 0.21)),
+        )
+    return _TAX_CFG
 
 
 class _NoFX:
@@ -31,7 +53,12 @@ def _nan(*vals: float) -> bool:
 
 
 def tax_rate(m: TickerMetrics, fy: int) -> float:
-    """Effektiver Steuersatz = Steueraufwand / Vorsteuergewinn."""
+    """Effektiver Steuersatz = Steueraufwand / Vorsteuergewinn.
+
+    v27: begrenzt auf `data.tax_rate_min`..`data.tax_rate_max` (0-35 %).
+    Ausserhalb davon und bei Vorsteuerverlust (pretax <= 0) gilt der
+    Normsteuersatz `data.tax_rate_norm` (21 %). Fehlende Daten -> NaN.
+    """
     y = m.years.get(fy, {})
     tax = y.get("income_tax_expense")
     pretax = y.get("income_before_tax")
@@ -40,16 +67,28 @@ def tax_rate(m: TickerMetrics, fy: int) -> float:
     t, p = tax.value, pretax.value
     if _nan(t, p) or p == 0:
         return float("nan")
-    return t / p
+    t_min, t_max, t_norm = _tax_bounds()
+    eff = t / p
+    if _nan(eff) or eff < t_min or eff > t_max or p <= 0:
+        return t_norm
+    return eff
 
 
 def nopat(m: TickerMetrics, fy: int) -> float:
-    """NOPAT = EBIT * (1 - Steuersatz)."""
+    """NOPAT = EBIT * (1 - Steuersatz).
+
+    v27: Bei EBIT <= 0 ist NOPAT = EBIT (kein Steuervorteil im Verlustjahr),
+    damit gilt immer NOPAT <= EBIT fuer EBIT > 0 (Steuersatz >= 0 begrenzt).
+    """
     ebit = m.years.get(fy, {}).get("ebit")
     if ebit is None:
         return float("nan")
+    if _nan(ebit.value):
+        return float("nan")
+    if ebit.value <= 0:
+        return ebit.value
     t = tax_rate(m, fy)
-    if _nan(ebit.value, t):
+    if _nan(t):
         return float("nan")
     return ebit.value * (1 - t)
 

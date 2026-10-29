@@ -57,20 +57,21 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             and dcf.shares == dcf.shares and dcf.shares > 0):
         price = m.market_cap.value / dcf.shares
 
-    # v26: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø)
+    # v27: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø / TTM rein)
     mos_by_mode = {}
-    for mode in ("avg3", "latest", "ttm"):
+    for mode in ("avg3", "latest", "ttm", "ttm_only"):
         dcf_m = compute_dcf(m, cfg, fcf_mode=mode)
         mos_by_mode[mode] = dcf_m.margin_of_safety
     mos_avg3 = mos_by_mode.get("avg3", float("nan"))
     mos_latest = mos_by_mode.get("latest", float("nan"))
     mos_ttm = mos_by_mode.get("ttm", float("nan"))
+    mos_ttm_only = mos_by_mode.get("ttm_only", float("nan"))
 
-    # v26: Kandidatenregel nutzt das konfigurierte MoS (min/avg3/latest/ttm/auto)
+    # v27: Kandidatenregel nutzt das konfigurierte MoS (min/avg3/latest/ttm/ttm_only/auto)
     dc = cfg["dcf"]
     mos_mode = str(dc.get("mos_min_mode", "min")).lower()
     if mos_mode == "min":
-        mos_candidates = [v for v in (mos_avg3, mos_latest, mos_ttm) if v == v]
+        mos_candidates = [v for v in (mos_avg3, mos_latest, mos_ttm, mos_ttm_only) if v == v]
         mos_rule = min(mos_candidates) if mos_candidates else float("nan")
     elif mos_mode == "auto":
         mos_rule = dcf.margin_of_safety
@@ -84,6 +85,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     quality_min = float(dc.get("buy_quality_min", 60))
     mos_min = float(dc.get("buy_margin_of_safety_min", 0.30))
     bear_floor = float(dc.get("buy_bear_floor", 0.80))
+    watch_min = float(dc.get("watch_margin_of_safety_min", 0.30))
     mos_bear = float("nan")
     mos_bull = float("nan")
     bear_vps = dcf.scenarios.get("bear")
@@ -112,6 +114,34 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             missing.append(f"Bear {bear_vps.value_per_share / price:.0%} Kurs < {bear_floor:.0%} Kurs")
         else:
             missing.append("Bear n/a")
+
+    # v27: Zwei Stufen -- "Kandidat" und "Beobachtung".
+    # Kandidat: Minimum der Modi >= 30 %, Quality >= 60, Bear >= 80 % Kurs
+    #   (bei Kandidat: der fuer das Minimum entscheidende Modus wird genannt).
+    # Beobachtung: Minimum < 30 %, aber der BESTE Modus >= 30 % und Quality >= 60.
+    #   (Bear spielt fuer die Beobachtungsliste keine Rolle.)
+    mode_names = {"avg3": "Ø3J", "latest": "jüngstes GJ",
+                  "ttm": "TTM Ø", "ttm_only": "TTM"}
+    status = "nein"
+    status_detail = ""
+    mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
+    quality_ok = result["quality"] == result["quality"] and result["quality"] >= quality_min
+    if dcf.is_buy:
+        status = "Kandidat"
+        if mos_mode == "min" and mos_vals:
+            min_val = min(v for _, v in mos_vals)
+            deciding = [mode_names.get(k, k) for k, v in mos_vals if v == min_val]
+            status_detail = f"entscheidend: MoS {mode_names.get(mos_mode, mos_mode)} " \
+                f"{mos_rule:.1%} (Minimum bei Modus {', '.join(deciding)})" if mos_rule == mos_rule else ""
+        elif mos_rule == mos_rule:
+            status_detail = f"entscheidend: MoS {mode_names.get(mos_mode, mos_mode)} {mos_rule:.1%}"
+    elif (quality_ok and mos_rule == mos_rule and mos_rule < mos_min and mos_vals):
+        best_mode, best_val = max(mos_vals, key=lambda kv: kv[1])
+        if best_val >= watch_min:
+            status = "Beobachtung"
+            status_detail = (f"bester Modus {mode_names.get(best_mode, best_mode)} "
+                             f"{best_val:.1%} ≥ {watch_min:.0%}, "
+                             f"aber min {mos_rule:.1%} < {mos_min:.0%}")
 
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
@@ -157,6 +187,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         flag_parts.append("kauf")
         logger.info("%s: Kaufkandidat (Quality %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
                     m.ticker, result["quality"], dcf.margin_of_safety * 100)
+    elif status == "Beobachtung":
+        flag_parts.append("beobachten")
+        logger.info("%s: Beobachtungsliste (%s)", m.ticker, status_detail)
     flags = " ".join(dict.fromkeys(flag_parts))  # entdoppeln, Reihenfolge behalten
     row = {
         "ticker": m.ticker,
@@ -182,18 +215,26 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         # MoS je Szenario + Kandidaten-Spalte (ja/nein + fehlende Bedingung)
         "mos_bear": mos_bear,
         "mos_bull": mos_bull,
-        # v26: MoS (Base) je Startwert-Modus (Rangliste nebeneinander)
+        # v27: MoS (Base) je Startwert-Modus (Rangliste nebeneinander)
         "mos_avg3": mos_avg3,
         "mos_latest": mos_latest,
         "mos_ttm": mos_ttm,
+        "mos_ttm_only": mos_ttm_only,
         "mos_rule": mos_rule,          # fuer Kandidatenregel verwendetes MoS (config mos_min_mode)
         "mos_rule_mode": mos_mode,
+        # v27: Zwei Stufen -- Kandidat / Beobachtung (+ Detail, welcher Modus entscheidet)
+        "status": status,
+        "status_detail": status_detail,
         # v26: MoS (Base) mit alternativer Nettoverschuldung
         "mos_base_alt_nd": dcf.mos_base_alt,
         "dcf_net_debt_mode": dcf.net_debt_mode,
         "dcf_net_debt_alt": dcf.net_debt_alt,
         "dcf_net_debt_alt_source": dcf.net_debt_alt_source,
-        "kandidat": "ja" if dcf.is_buy else ("nein: " + "; ".join(missing) if missing else "nein"),
+        "kandidat": ("ja" if dcf.is_buy else
+                     (status if status != "nein" else "nein")
+                     + (f" ({status_detail})" if status_detail else "")
+                     if dcf.is_buy or status != "nein"
+                     else ("nein: " + "; ".join(missing) if missing else "nein")),
         # TTM-Basis des DCF (Scorecard-Anzeige: Stichtag + Basis)
         "dcf_fcf_basis": dcf.fcf_basis,
         "dcf_ttm_quarter_end": dcf.ttm_quarter_end,

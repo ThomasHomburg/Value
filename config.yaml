@@ -10,6 +10,12 @@
 #     sind absolute USD (nicht Mio.). Ratios sind dimensionslos.
 
 data:
+  # ROIC: effektiver Steuersatz wird auf tax_rate_min..tax_rate_max begrenzt;
+  # ausserhalb (oder bei Vorsteuerverlust) gilt der Normsteuersatz tax_rate_norm.
+  # Bei EBIT <= 0 ist NOPAT = EBIT (kein Steuervorteil im Verlustjahr).
+  tax_rate_min: 0.0           # effektiver Steuersatz < 0 %  -> Normsteuersatz
+  tax_rate_max: 0.35          # effektiver Steuersatz > 35 % -> Normsteuersatz
+  tax_rate_norm: 0.21         # Normsteuersatz (US-Koerperschaftsteuer)
   years: 5                    # Historienfenster: 5 Jahre pro Unternehmen
   thin_years: 5               # Kriterium mit weniger Jahren Daten -> "Daten duenn"
   min_points_5y: 3            # Mindestanzahl Datenpunkte fuer 5-Jahres-Kennzahlen
@@ -163,14 +169,18 @@ dcf:
   fade_to_growth: 0.025
   fcf_avg_years: 3
   fcf_mode: auto              # DCF-Startwert: auto (TTM falls plausibel, sonst O3J)
-                              # | avg3 (O letzte 3 GJ) | latest (juengstes GJ) | ttm
+                              # | avg3 (O letzte 3 GJ) | latest (juengstes GJ)
+                              # | ttm (TTM O: TTM + 2 nicht ueberlappende GJ)
+                              # | ttm_only (reiner TTM-Start, ohne O)
   net_debt_mode: reported     # Nettoverschuldung: reported (gemeldet) |
                               # incl_sti (Schulden - (Cash + kurzfr. Anlagen))
-  mos_min_mode: min           # Kandidatenregel MoS: min (Minimum der 3 Startwert-MoS)
-                              # | avg3 | latest | ttm | auto (wie fcf_mode)
+  mos_min_mode: min           # Kandidatenregel MoS: min (Minimum der 4 Startwert-MoS)
+                              # | avg3 | latest | ttm | ttm_only | auto (wie fcf_mode)
   buy_quality_min: 60         # Kaufkandidat: Quality-Score >= 60 (statt Gesamtscore)
   buy_margin_of_safety_min: 0.30
   buy_bear_floor: 0.80
+  watch_margin_of_safety_min: 0.30  # Beobachtungsliste: bester Modus >= 30 %,
+                                    # obwohl das Minimum < 30 % (Quality >= 60)
 
 sec:
   # SEC-EDGAR-Abgleich (kostenlos, data.sec.gov). User-Agent MIT E-Mail als

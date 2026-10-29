@@ -128,7 +128,8 @@ def test_mos_by_mode_in_row(cfg):
     qual = next(c for c in demo_companies() if c.ticker == "QUAL")
     out = evaluate_ticker(qual, cfg)
     row = out["row"]
-    for col in ("mos_avg3", "mos_latest", "mos_ttm", "mos_rule", "mos_rule_mode"):
+    for col in ("mos_avg3", "mos_latest", "mos_ttm", "mos_ttm_only",
+                "mos_rule", "mos_rule_mode"):
         assert col in row, f"fehlt: {col}"
     assert row["mos_rule_mode"] == cfg["dcf"].get("mos_min_mode", "min")
 
@@ -140,7 +141,8 @@ def test_mos_rule_min_ist_minimum(cfg):
     qual = next(c for c in demo_companies() if c.ticker == "QUAL")
     out = evaluate_ticker(qual, cfg)
     row = out["row"]
-    vals = [v for v in (row["mos_avg3"], row["mos_latest"], row["mos_ttm"]) if v == v]
+    vals = [v for v in (row["mos_avg3"], row["mos_latest"], row["mos_ttm"],
+                        row["mos_ttm_only"]) if v == v]
     if vals:
         assert row["mos_rule"] == pytest.approx(min(vals))
 
@@ -360,6 +362,8 @@ V26_ROW_COLUMNS = {
     "mos_avg3", "mos_latest", "mos_ttm", "mos_rule", "mos_rule_mode",
     "mos_base_alt_nd", "dcf_net_debt_mode", "dcf_net_debt_alt",
     "dcf_net_debt_alt_source", "sec_check_ok", "sec_check_flag", "sec_check_note",
+    # v27
+    "mos_ttm_only", "status", "status_detail",
 }
 
 

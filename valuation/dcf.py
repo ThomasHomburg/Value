@@ -56,7 +56,7 @@ class DcfResult:
     net_debt: float = float("nan")   # Nettoverschuldung OHNE Kundengelder (Berichtsw., aktuell)
     net_debt_source: str = ""        # "net_debt (gemeldet, exkl. Kundengelder)" | "total_debt - cash" | "n/a"
     customer_deposits: float = float("nan")  # Kundengelder (z. B. PYPL), in Cash enthalten
-    fcf_mode: str = "auto"           # Startwert-Modus: "auto" | "avg3" | "latest" | "ttm"
+    fcf_mode: str = "auto"           # Startwert-Modus: "auto" | "avg3" | "latest" | "ttm" | "ttm_only"
     net_debt_mode: str = "reported"  # "reported" (gemeldet) | "incl_sti" (Schulden − (Cash+kurzfr.Anl.))
     net_debt_alt: float = float("nan")  # alternative Nettoverschuldung (anderer Modus, Berichtsw.)
     net_debt_alt_source: str = ""    # Quelle der alternativen Nettoverschuldung
@@ -170,6 +170,31 @@ def _ttm_fcf_start(m: TickerMetrics) -> dict | None:
     }
 
 
+def _ttm_only_fcf_start(m: TickerMetrics) -> dict | None:
+    """v27: Reiner TTM-Start-FCF nach SBC (ohne Ø ueber mehrere Perioden).
+
+    Wie _ttm_fcf_start, aber nur das TTM-Fenster (Summe der letzten 4
+    Quartale) -- keine Hinzunahme davor liegender Geschaeftsjahre.
+    Rueckgabe: None wenn TTM nicht verwendbar (kein TTM, unplausibel,
+    Fallback aktiv), sonst dict mit fcf / years_used=1 / quarter_end /
+    sources / currency.
+    """
+    ttm = getattr(m, "ttm", None)
+    if (ttm is None or not getattr(m, "ttm_plausible", True)
+            or getattr(m, "ttm_fallback", False)):
+        return None
+    ttm_fcf = ttm.ttm.get("fcf_sbc")
+    if ttm_fcf is None or ttm_fcf.is_na():
+        return None
+    return {
+        "fcf": ttm_fcf.value,
+        "years_used": 1,
+        "quarter_end": ttm.quarter_end,
+        "sources": [("TTM", ttm_fcf.value, ttm_fcf.currency)],
+        "currency": ttm_fcf.currency,
+    }
+
+
 def _avg_fcf_start(m: TickerMetrics, n: int) -> dict | None:
     """Ø FCF-SBC der letzten n Geschaeftsjahre mit Daten (chronologisch)."""
     sbc_series = [(fy, m.years[fy]["fcf_sbc"]) for fy in sorted(m.years)
@@ -272,8 +297,10 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
 
     fcf_mode: Startwert des FCF -- "auto" (Config `dcf.fcf_mode`, Default:
     TTM-Basis falls plausibel, sonst Ø letzte 3 GJ), "avg3" (Ø letzte 3 GJ),
-    "latest" (juengstes GJ), "ttm" (TTM-Basis, Rueckfall auf Ø3J wenn TTM
-    nicht verwendbar).
+    "latest" (juengstes GJ), "ttm" (TTM Ø: Ø aus TTM + 2 nicht
+    ueberlappenden GJ, Rueckfall auf Ø3J wenn TTM nicht verwendbar),
+    "ttm_only" (v27: reiner TTM-Start-FCF nach SBC, ohne Ø; Rueckfall auf
+    Ø3J wenn TTM nicht verwendbar).
 
     Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert
     Terminal Value) - Nettoverschuldung OHNE Kundengelder. Wert je Aktie =
@@ -283,7 +310,7 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     dcfg = cfg["dcf"]
     nan = float("nan")
     mode = (fcf_mode or dcfg.get("fcf_mode", "auto")).lower()
-    if mode not in ("auto", "avg3", "latest", "ttm"):
+    if mode not in ("auto", "avg3", "latest", "ttm", "ttm_only"):
         mode = "auto"
     result = DcfResult(
         fcf_normalized=nan, fcf_years_used=0, revenue_cagr=nan,
@@ -296,6 +323,8 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     start = None
     if mode in ("auto", "ttm"):
         start = _ttm_fcf_start(m)
+    if start is None and mode == "ttm_only":
+        start = _ttm_only_fcf_start(m)  # v27: reiner TTM-Start (ohne Ø)
     if start is None and mode == "latest":
         start = _avg_fcf_start(m, 1)
     if start is None and mode != "latest":
@@ -305,7 +334,7 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     result.fcf_normalized = start["fcf"]
     result.fcf_years_used = start["years_used"]
     result.fcf_sources = start["sources"]
-    if mode in ("auto", "ttm") and "quarter_end" in start:
+    if mode in ("auto", "ttm", "ttm_only") and "quarter_end" in start:
         result.fcf_basis = "ttm"
         result.ttm_quarter_end = start["quarter_end"]
     else:

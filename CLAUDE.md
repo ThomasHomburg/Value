@@ -59,17 +59,20 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - Sektor ueber FMP-Feld `sector` bestimmen; Config-Block je Sektor in `config.yaml`
 
 ## Innerer Wert (DCF, 3 Szenarien)
-- Basis: normalisierter FCF nach SBC = O der letzten 3 Jahre (umschaltbar: jungstes GJ / TTM; Config `dcf.fcf_mode`, TTM = O TTM + 2 nicht uberlappende GJ)
+- Basis: normalisierter FCF nach SBC = O der letzten 3 Jahre (umschaltbar: jungstes GJ / TTM O / TTM rein; Config `dcf.fcf_mode`, TTM O = O TTM + 2 nicht uberlappende GJ, TTM rein = Summe letzte 4 Quartale ohne O)
 - Wachstum Jahre 1-5: Bear 0 %, Base = min(Umsatz-CAGR 5 J., 6 %), Bull = min(CAGR x 1,3; 10 %)
 - Wachstum Jahre 6-10: linear abnehmend auf 2,5 %
 - Terminal Growth: 2,5 %; Diskontsatz: 9 % (Config, bei Zyklikern 10 %)
 - Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert TV) - Nettoverschuldung OHNE Kundengelder (Kundengelder z. B. PYPL Deposit Liabilities sitzen in Cash -> werden hinzuaddiert)
 - Ausgabe: innerer Wert je Aktie je Szenario, Margin of Safety = 1 - Kurs / innerer Wert (Base)
 - **Nettoverschuldung umschaltbar** (Config `dcf.net_debt_mode`): `reported` (gemeldet) oder `incl_sti` (Finanzschulden - (Cash + kurzfristige Anlagen)); beide Varianten werden gerechnet, die aktive per Config, die andere als `net_debt_alt` / `mos_base_alt`
-- **MoS je Startwert-Modus**: Rangliste zeigt MoS (Base) fur O3J / jungstes GJ / TTM nebeneinander; Kandidatenregel nutzt das Minimum der drei (Config `dcf.mos_min_mode`)
+- **MoS je Startwert-Modus**: Rangliste zeigt MoS (Base) fur O3J / jungstes GJ / TTM O / TTM rein nebeneinander; Kandidatenregel nutzt das Minimum der vier (Config `dcf.mos_min_mode`)
 - **Letzte 4 Quartale**: TtmResult.quarters (neuestes zuerst) mit OCF/Capex/SBC/FCF-SBC je Quartal + Stichtag (Scorecard-Anzeige)
 - **SEC-EDGAR-Abgleich** (`data/sec.py`, US-Ticker): OCF/Capex/SBC je Jahr gegen data.sec.gov/api/xbrl/companyfacts; Abweichung > `sec.tolerance` (5 %) -> Flag `sec:abweichend`. User-Agent MIT E-Mail (Config `sec.user_agent`, Platzhalter)
-- **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety >= 30 % (Minimum der Startwert-MoS, `dcf.mos_min_mode`) UND Bear-Szenario >= Kurs x 0,8
+- **ROIC/NOPAT**: Steuersatz = Steuer/Vorsteuergewinn, begrenzt 0-35 % (`data.tax_rate_min/max`);
+  ausserhalb/Vorsteuerverlust -> Normsteuersatz 21 % (`data.tax_rate_norm`); EBIT <= 0 -> NOPAT = EBIT
+- **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety >= 30 % (Minimum der Startwert-MoS, `dcf.mos_min_mode`) UND Bear-Szenario >= Kurs x 0,8; Kandidat nennt den entscheidenden Modus
+- **Beobachtung** (Flag `beobachten`): min der MoS < 30 %, aber bester Modus >= `dcf.watch_margin_of_safety_min` (30 %) und Quality >= 60
 
 ## UI (Streamlit)
 - **Seite 1 Rangliste**: sortierbare Tabelle (Ticker, Name, Sektor, Score, FCF-Yield, Margin of Safety, Flags), Filter nach Sektor/Land/Score

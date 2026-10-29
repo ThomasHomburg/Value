@@ -33,6 +33,8 @@ APP_ROW_COLUMNS = {
     "dcf_net_debt_alt_source",
     # v26: SEC-EDGAR-Abgleich
     "sec_check_ok", "sec_check_flag", "sec_check_note",
+    # v27: reiner TTM-Start (ttm_only) + Zwei Stufen Kandidat/Beobachtung
+    "mos_ttm_only", "status", "status_detail",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen
