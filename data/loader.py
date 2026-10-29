@@ -32,8 +32,12 @@ class TickerMetrics:
     ticker: str
     name: str = ""
     sector: str = ""
+    industry: str = ""   # v28: Branchen-Feld (GICS Industry) -- Sektorregeln (Banken/Versicherer/Zykliker/REIT)
     country: str = ""
     source: str = ""  # Datenquelle: fmp | yfinance | demo
+    # v28: Zusatzkennzahlen fuer Sektorregeln (Banken/Versicherer: P/B,
+    # Dividendenrendite; REITs: FFO-Hinweis). Je Kennzahl eine Metric.
+    extras: dict[str, Metric] = field(default_factory=dict)
     market_cap: Metric | None = None
     market_cap_date: str = ""  # Stichtag der Marktkapitalisierung (ISO-Datum, Abrufdatum)
     years: dict[str, dict[str, Metric]] = field(default_factory=dict)
@@ -133,8 +137,18 @@ def extract_metrics(
     if profile:
         result.name = profile.get("companyName", "")
         result.sector = profile.get("sector", "") or "Unbekannt"
+        # v28: Industry separat (FMP: 'industry'; yfinance: uebergeben als industry)
+        result.industry = profile.get("industry", "") or ""
         result.country = profile.get("country", "") or ""
         mcap = profile.get("mktCap", profile.get("marketCap"))
+        # v28: Zusatzkennzahlen (P/B, Dividendenrendite, FFO, ...) aus dem Profil
+        for key in ("price_to_book", "dividend_yield", "ffo_per_share", "ffo"):
+            raw = profile.get(key)
+            if raw is not None:
+                try:
+                    result.extras[key] = Metric(key, float(raw), "ratio", "", 0)
+                except (TypeError, ValueError):
+                    pass
         if mcap is not None:
             # FMP liefert mktCap in absoluten USD (wie die Statements);
             # KEINE Umrechnung auf Mio. -- sonst Misch-Einheiten (Faktor 1e6)

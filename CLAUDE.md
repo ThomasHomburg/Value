@@ -64,18 +64,20 @@ Umsatz, EBIT, Nettogewinn, Operating Cashflow, Capex, FCF (= OCF - Capex), Eigen
 - Wachstum Jahre 6-10: linear abnehmend auf 2,5 %
 - Terminal Growth: 2,5 %; Diskontsatz: 9 % (Config, bei Zyklikern 10 %)
 - Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert TV) - Nettoverschuldung OHNE Kundengelder (Kundengelder z. B. PYPL Deposit Liabilities sitzen in Cash -> werden hinzuaddiert)
-- Ausgabe: innerer Wert je Aktie je Szenario, Margin of Safety = 1 - Kurs / innerer Wert (Base)
+- Ausgabe: innerer Wert je Aktie je Szenario (Bear/Base/Bull) JE STARTWERT-MODUS in der Scorecard-Modus-Tabelle, Margin of Safety = 1 - Kurs / innerer Wert (Base)
 - **Nettoverschuldung umschaltbar** (Config `dcf.net_debt_mode`): `reported` (gemeldet) oder `incl_sti` (Finanzschulden - (Cash + kurzfristige Anlagen)); beide Varianten werden gerechnet, die aktive per Config, die andere als `net_debt_alt` / `mos_base_alt`
 - **MoS je Startwert-Modus**: Rangliste zeigt MoS (Base) fur O3J / jungstes GJ / TTM O / TTM rein nebeneinander; Kandidatenregel nutzt das Minimum der vier (Config `dcf.mos_min_mode`)
 - **Letzte 4 Quartale**: TtmResult.quarters (neuestes zuerst) mit OCF/Capex/SBC/FCF-SBC je Quartal + Stichtag (Scorecard-Anzeige)
 - **SEC-EDGAR-Abgleich** (`data/sec.py`, US-Ticker): OCF/Capex/SBC je Jahr gegen data.sec.gov/api/xbrl/companyfacts; Abweichung > `sec.tolerance` (5 %) -> Flag `sec:abweichend`. User-Agent MIT E-Mail (Config `sec.user_agent`, Platzhalter)
 - **ROIC/NOPAT**: Steuersatz = Steuer/Vorsteuergewinn, begrenzt 0-35 % (`data.tax_rate_min/max`);
   ausserhalb/Vorsteuerverlust -> Normsteuersatz 21 % (`data.tax_rate_norm`); EBIT <= 0 -> NOPAT = EBIT
+- **Sektorregeln (Schritt 7, ueber INDUSTRY nicht Sector)**: Banken/Versicherer (Banks*, Insurance*, Capital Markets, Asset Management) -> ROE, P/B, Dividendenrendite statt ROIC/FCF/ND/EBITDA; Zykliker (Rohstoffe/Chemie/Stahl/Auto/Energie) -> Gewinne ueber bis zu 7 Jahre normalisiert (sonst Flag `zyk:norm<7J`); REITs (Industry-Praefix 'REIT -') -> FFO-Hinweis statt FCF-Yield. Config: `sector_rules`. PYPL/V/MA (Credit Services) sind KEINE Banken.
+- **Universumslader (Schritt 8)**: S&P 500 (Wikipedia -> tickers_sp500.csv, im Repo), STOXX 600 (CSV-Import). Batches (`universe.batch_size`), Pause, Fortschritt, Wiederaufnahme (`.universe_cache.json`), Fehlerlog je Ticker (Fehler stoppt Lauf nicht). CLI: `run_universe.py sp500|stoxx600`; UI: Seite 3.
 - **Kaufkandidat**: Quality-Score >= 60 (config `buy_quality_min`) UND Margin of Safety >= 30 % (Minimum der Startwert-MoS, `dcf.mos_min_mode`) UND Bear-Szenario >= Kurs x 0,8; Kandidat nennt den entscheidenden Modus
 - **Beobachtung** (Flag `beobachten`): min der MoS < 30 %, aber bester Modus >= `dcf.watch_margin_of_safety_min` (30 %) und Quality >= 60
 
 ## UI (Streamlit)
-- **Seite 1 Rangliste**: sortierbare Tabelle (Ticker, Name, Sektor, Score, FCF-Yield, Margin of Safety, Flags), Filter nach Sektor/Land/Score
+- **Seite 1 Rangliste**: sortierbare Tabelle (Ticker, Name, Sektor, Score, FCF-Yield, Margin of Safety, MoS je Startwert-Modus, Status, SEC-Abgleich, Flags); ausgeschlossene Ticker als Tabelle MIT GRUND direkt unter der Rangliste; Filter nach Sektor/Land/Score
 - **Seite 2 Scorecard**: Block-Scores als Balken, 10-J.-Charts (Umsatz, FCF-Marge, ROIC, Verschuldung), DCF-Tabelle mit 3 Szenarien (beide Nettoverschuldungs-Varianten + MoS nebeneinander, MoS Base je Startwert-Modus), letzte 4 Quartale mit Stichtag, SEC-Abgleich-Hinweis, Liste der Rohdaten mit Quelle und Datum
 - **Seite 3 Import**: CSV-Upload und manuelle Eingabe als Fallback
 

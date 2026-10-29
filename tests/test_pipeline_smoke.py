@@ -35,6 +35,10 @@ APP_ROW_COLUMNS = {
     "sec_check_ok", "sec_check_flag", "sec_check_note",
     # v27: reiner TTM-Start (ttm_only) + Zwei Stufen Kandidat/Beobachtung
     "mos_ttm_only", "status", "status_detail",
+    # v28: Sektorgruppe (Industry) + Sektor-Kennzahlen
+    "sector_group", "sector_note", "industry",
+    "normalized_earnings", "normalized_earnings_years",
+    "price_to_book", "dividend_yield",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen

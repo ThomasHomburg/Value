@@ -128,6 +128,127 @@ criteria:
     full: 0.60
     zero: 1.20
 
+  # v28: Sektor-Kriterien (Schritt 7, Industry-basiert, siehe sector_rules).
+  # Banken/Versicherer: ROE, P/B, Dividendenrendite statt ROIC/FCF/ND/EBITDA.
+  # Zykliker: normalisierter Gewinn (7-J.-Normalisierung). REITs: FFO-Yield.
+  roe_avg5_financials:
+    block: profitability
+    weight: 0.25
+    direction: higher
+    full: 0.20
+    zero: 0.08
+  price_to_book:
+    block: stability
+    weight: 0.10
+    direction: lower
+    full: 1.0
+    zero: 3.0
+  dividend_yield:
+    block: cashflow
+    weight: 0.10
+    direction: higher
+    full: 0.05
+    zero: 0.01
+  normalized_earnings:
+    block: profitability
+    weight: 0.15
+    direction: higher
+    full: 15.0
+    zero: 3.0
+  ffo_yield:
+    block: valuation
+    weight: 0.30
+    direction: higher
+    full: 0.10
+    zero: 0.03
+
+sector_rules:
+  # v28 (Schritt 7): Sektorregeln ueber das Feld INDUSTRY, nicht Sector
+  # (PYPL, Visa, Mastercard laufen als 'Financial Services', sind aber
+  # keine Banken).
+  groups:
+    financials:
+      # Banken & Versicherer: ROE, P/B, Dividendenrendite statt
+      # ROIC, FCF, ND/EBITDA.
+      industries:
+        - Banks - Diversified
+        - Banks - Regional
+        - Banks - Money Center
+        - Insurance - Property & Casualty
+        - Insurance - Life
+        - Insurance - Diversified
+        - Insurance - Reinsurance
+        - Insurance - Specialty
+        - Insurance - Brokers
+        - Capital Markets
+        - Asset Management
+        - Financial Data & Stock Exchanges
+        - Diversified Financial Services
+        - Mortgage Finance
+    cyclicals:
+      # Zykliker (Rohstoffe, Chemie, Stahl, Auto): Gewinne ueber bis zu
+      # N Jahre normalisieren, soweit Daten reichen, sonst Flag.
+      normalize_years: 7
+      industries:
+        - Gold
+        - Silver
+        - Copper
+        - Aluminum
+        - Steel
+        - Coal
+        - Uranium
+        - Other Industrial Metals & Mining
+        - Other Precious Metals & Mining
+        - Chemicals
+        - Specialty Chemicals
+        - Agricultural Inputs
+        - Auto Manufacturers
+        - Auto Parts
+        - Auto & Truck Dealerships
+        - Trucking
+        - Railroads
+        - Oil & Gas Integrated
+        - Oil & Gas E&P
+        - Oil & Gas Refining & Marketing
+        - Oil & Gas Midstream
+        - Oil & Gas Equipment & Services
+        - Building Products & Equipment
+        - Construction Materials
+        - Residential Construction
+        - Home Improvement Retail
+        - Department Stores
+        - Discount Stores
+        - Apparel Retail
+        - Specialty Retail
+        - Restaurants
+        - Resorts & Casinos
+        - Lodging
+        - Travel Services
+        - Airlines
+        - Aerospace & Defense
+        - Metal Fabrication
+        - Steel & Iron
+        - Lumber & Wood Production
+        - Paper & Paper Products
+        - Packaging & Containers
+        - Industrial Gases
+        - Integrated Freight & Logistics
+        - Marine Shipping
+        - Airports & Air Services
+        - Electrical Equipment & Parts
+        - Specialty Industrial Machinery
+        - Industrial Distribution
+        - Farm & Heavy Construction Machinery
+        - Luxury Goods
+        - Internet Retail
+        - Recreational Vehicles
+        - Entertainment
+        - Advertising Agencies
+        - Rental & Leasing Services
+    reits:
+      # REITs: FFO-Hinweis statt FCF-Yield (FFO je Aktie ist massgeblich).
+      industries: []   # Erkennung ueber Industry-Praefix 'REIT - ...'
+
 score_groups:
   # Quality-Score und Value-Score werden getrennt berechnet (gewichtete Summe
   # der Block-Scores je Gruppe, renormalisiert auf die verfuegbaren Bloecke).
@@ -188,3 +309,16 @@ sec:
   user_agent: "Value-Screener research@example.com"
   enabled: true               # false = Abgleich deaktivieren
   tolerance: 0.05             # Flag "Quellen weichen ab" ab > 5 % Abweichung je Jahr
+
+universe:
+  # v28 (Schritt 8): Universumslader.
+  # sp500: Liste von der Wikipedia-Tabelle (pandas.read_html), wird als
+  #        tickers_sp500.csv gespeichert und von dort geladen.
+  # stoxx600: Import per CSV (tickers_stoxx600.csv, Spalte 'ticker').
+  sp500_wikipedia_url: "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+  sp500_csv: "tickers_sp500.csv"
+  stoxx600_csv: "tickers_stoxx600.csv"
+  batch_size: 20              # Abruf in Batches (z. B. 20 Ticker)
+  batch_pause_seconds: 2.0    # Pause zwischen Batches (yfinance-Rate-Limit)
+  resume: true                # Wiederaufnahme nach Abbruch (Cache-Datei)
+  cache_file: ".universe_cache.json"  # Fortschritt je Ticker (OK/Fehler)

@@ -4,3 +4,5 @@ __pycache__/
 *.db
 *.sqlite
 .venv/
+.universe_cache.json
+tickers_stoxx600.csv

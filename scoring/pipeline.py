@@ -12,7 +12,8 @@ import math
 from data.loader import TickerMetrics
 from data.metrics import fcf_yield, fcf_yield_sbc, roic
 from data.sanity import check_ticker
-from scoring.criteria import compute_criteria
+from scoring.criteria import compute_criteria, active_criteria
+from scoring.sectors import sector_rule, normalized_net_income, price_to_book, dividend_yield
 from scoring.filters import check_filters
 from scoring.score import score_ticker
 from valuation.dcf import compute_dcf, is_buy_candidate
@@ -48,6 +49,16 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     result = score_ticker(criteria, cfg["criteria"], cfg.get("score_groups"))
     out["criteria"] = criteria
     out["score"] = result
+
+    # v28: Sektorgruppe (Industry-basiert) + Sektor-Kennzahlen in die Row
+    rule = sector_rule(m, cfg)
+    norm_ni, norm_years = normalized_net_income(m, rule)
+    row_sector_group = rule.group
+    row_sector_note = rule.note
+    row_normalized_earnings = norm_ni
+    row_normalized_earnings_years = norm_years
+    row_price_to_book = price_to_book(m)
+    row_dividend_yield = dividend_yield(m)
 
     # DCF (Build-Schritt 6): MoS Base in die Row; Kaufkandidat markieren
     dcf = compute_dcf(m, cfg)
@@ -183,6 +194,13 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 logger.warning("%s: %s", m.ticker, sec.note)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
+    # v28: Zykliker mit weniger Jahren als normalize_years -> Flag + Log
+    if rule.group == "cyclicals" and 0 < norm_years < max(1, rule.normalized_earnings_years):
+        flag_parts.append("zyk:norm<7J")
+        logger.info("%s: Zykliker -- Gewinnnormalisierung ueber %d Jahre (< %d) -> Flag",
+                    m.ticker, norm_years, rule.normalized_earnings_years)
+    if rule.group == "reits":
+        logger.info("%s: REIT (%s) -- %s", m.ticker, m.industry, rule.note)
     if dcf.is_buy:
         flag_parts.append("kauf")
         logger.info("%s: Kaufkandidat (Quality %.1f, MoS Base %.1f%%, Bear >= 80%% Kurs)",
@@ -252,6 +270,14 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         if dcf.scenarios.get("bull") else float("nan"),
         "is_buy": dcf.is_buy,
         "flags": flags,
+        # v28: Sektorgruppe (Industry) + Sektor-Kennzahlen
+        "sector_group": row_sector_group,
+        "sector_note": row_sector_note,
+        "industry": m.industry,
+        "normalized_earnings": row_normalized_earnings,
+        "normalized_earnings_years": row_normalized_earnings_years,
+        "price_to_book": row_price_to_book,
+        "dividend_yield": row_dividend_yield,
         # v26: SEC-EDGAR-Abgleich
         "sec_check_ok": bool(sec and sec.ok),
         "sec_check_flag": bool(sec and sec.flag),

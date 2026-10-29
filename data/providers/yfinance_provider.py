@@ -110,8 +110,25 @@ class YfinanceProvider:
         result = TickerMetrics(ticker=ticker.upper())
         result.name = info.get("longName") or info.get("shortName") or ""
         result.sector = info.get("sector") or "Unbekannt"
+        # v28: Industry separat (GICS Industry) -- Sektorregeln (Banken/
+        # Versicherer/Zykliker/REIT) laufen ueber Industry, nicht Sector
+        # (PYPL/V/MA laufen als 'Financial Services', sind aber keine Banken).
+        result.industry = info.get("industry") or ""
         result.country = info.get("country") or ""
         result.source = self.name
+        # v28: Zusatzkennzahlen fuer Sektorregeln (Banken/Versicherer: P/B,
+        # Dividendenrendite; REITs: FFO-Hinweis falls gemeldet).
+        ptb = info.get("priceToBook")
+        if ptb is not None:
+            result.extras["price_to_book"] = Metric("price_to_book", float(ptb), "ratio", "", 0)
+        dy = info.get("dividendYield")
+        if dy is not None:
+            # yfinance liefert dividendYield teils als Prozent (2.5), teils als
+            # Dezimalzahl (0.025) -- heuristisch auf Dezimal normieren.
+            dy_val = float(dy)
+            if dy_val > 1.0:
+                dy_val = dy_val / 100.0
+            result.extras["dividend_yield"] = Metric("dividend_yield", dy_val, "ratio", "", 0)
         if mcap is not None:
             # marketCap in Quote-Waehrung, absolut (wie FMP mktCap)
             result.market_cap = Metric("market_cap", float(mcap), currency, currency,

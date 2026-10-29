@@ -102,13 +102,6 @@ def page_ranking() -> None:
         st.caption("Tipp: `tickers.csv` im Projektordner legt die Live-Ticker fest (20 Stueck voreingestellt). "
                    "US-Ticker -> FMP (mit FMP_API_KEY), alle anderen -> yfinance.")
 
-    with st.expander("Ausgeschlossene Ticker (harte Filter)", expanded=False):
-        if excluded:
-            for e in excluded:
-                st.write(f"**{e['ticker']}** ({e['name']}): " + "; ".join(e["reasons"]))
-        else:
-            st.write("Keine Ausschluesse.")
-
     if not rows:
         st.info("Keine Ticker nach den Filtern uebrig.")
         return
@@ -151,6 +144,19 @@ def page_ranking() -> None:
     view["MoS TTM"] = view["mos_ttm_only"].map(_fmt_pct)
     # v27: Zwei Stufen -- Kandidat / Beobachtung (mit entscheidendem Modus)
     view["Status"] = view["status"].map(lambda v: str(v))
+    # v28: SEC-EDGAR-Abgleich in der Rangliste sichtbar (US-Ticker)
+    def _sec_col(r):
+        if r["sec_check_flag"]:
+            return "⚠ Quellen weichen ab"
+        if r["sec_check_ok"]:
+            return "ok"
+        note = (r.get("sec_check_note") or "")
+        if "deaktiviert" in note:
+            return "aus"
+        if "kein US-Ticker" in note:
+            return "n/a (kein US)"
+        return "n/a"
+    view["SEC"] = df.apply(_sec_col, axis=1)
     # v26: MoS (Base) mit alternativer Nettoverschuldung
     view["MoS alt. ND"] = view["mos_base_alt_nd"].map(_fmt_pct)
     view["MoS Bear"] = view["mos_bear"].map(_fmt_pct)
@@ -164,7 +170,7 @@ def page_ranking() -> None:
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
                  "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM", "MoS alt. ND",
-                 "MoS Bear", "MoS Bull", "Status", "Kandidat", "Flags"]
+                 "MoS Bear", "MoS Bull", "Status", "Kandidat", "SEC", "Flags"]
     # v27: Standard-Sortierung: Kandidat zuerst, dann Beobachtung, dann MoS (Base) absteigend
     view["_kauf"] = (view["Status"] == "Kandidat").astype(int)
     view["_watch"] = (view["Status"] == "Beobachtung").astype(int)
@@ -173,6 +179,16 @@ def page_ranking() -> None:
     view = view[show_cols]
     st.caption(f"{len(view)} bewertet, {len(excluded)} ausgeschlossen "
                f"({total_tickers} Ticker gesamt, {len(view)} nach Filter)")
+    # v28: Ausgeschlossene Ticker als Tabelle MIT GRUND direkt unter der Rangliste
+    # (nicht im Expander versteckt)
+    if excluded:
+        st.markdown(f"**Ausgeschlossene Ticker ({len(excluded)}, harte Filter)**")
+        excl_rows = [{
+            "Ticker": e["ticker"],
+            "Name": e["name"],
+            "Grund": "; ".join(e["reasons"]),
+        } for e in excluded]
+        st.dataframe(pd.DataFrame(excl_rows), width="stretch", hide_index=True)
     # Durch Sektor-/Land-Filter ausgeblendete Ticker anzeigen
     hidden = df[~mask]
     hidden_tickers = sorted(hidden["ticker"].tolist())
@@ -221,6 +237,7 @@ def page_ranking() -> None:
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
         "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
+        "SEC": st.column_config.TextColumn("SEC", help="SEC-EDGAR-Abgleich (US-Ticker): ok = OCF/Capex/SBC gegen data.sec.gov geprueft, Abweichung <= 5 %; ⚠ Quellen weichen ab = Abweichung > 5 % in mind. 1 Jahr; n/a (kein US) = kein US-Ticker; aus = deaktiviert"),
         "Flags": st.column_config.TextColumn("Flags", help="blk:duenn = Block mit >30 % fehlenden Daten · duenn = Kriterium mit < 5 Jahren Daten · kl.Kapital = ROIC > 100 % (kleine/negative Kapitalbasis) · kauf = Kaufkandidat (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs)"),
     }
     st.dataframe(styler, width="stretch", hide_index=True, column_config=col_cfg)
@@ -347,6 +364,15 @@ def page_scorecard() -> None:
     if res.get("thin_criteria"):
         st.caption(f"'Daten dünn (x J.)' = weniger als {CFG['data'].get('thin_years', 5)} Jahre Daten "
                    f"(Fenster: {CFG['data'].get('years', 5)} J.) – Score-Aussage eingeschränkt.")
+
+    # v28: Sektorgruppe (Industry-basiert) + Sektor-Hinweis
+    sg = res["row"].get("sector_group", "standard")
+    sg_label = {"financials": "Bank/Versicherer", "cyclicals": "Zykliker",
+                "reits": "REIT", "standard": "Standard"}.get(sg, sg)
+    snote = res["row"].get("sector_note", "")
+    if sg != "standard":
+        st.info(f"Sektorgruppe (Industry „{m.industry}“): **{sg_label}**"
+                + (f" — {snote}" if snote else ""))
 
     # ROIC: Definition + Rohwerte mit Einheit/Waehrung (neuestes FY)
     st.subheader("ROIC – Definition und Rohwerte (neuestes FY)")
@@ -488,10 +514,10 @@ def page_scorecard() -> None:
                 return "n/a" if v != v else f"{v / 1e9:,.2f}"
             q_rows.append({
                 "Quartal (Stichtag)": q["quarter_end"],
-                "OCF (Mrd.)": _qb(q["operating_cashflow"]),
-                "Capex (Mrd.)": _qb(q["capex"]),
-                "SBC (Mrd.)": _qb(q["stock_based_compensation"]),
-                "FCF − SBC (Mrd.)": _qb(q["fcf_sbc"]),
+                f"OCF (Mrd. {cur_q})": _qb(q["operating_cashflow"]),
+                f"Capex (Mrd. {cur_q})": _qb(q["capex"]),
+                f"SBC (Mrd. {cur_q})": _qb(q["stock_based_compensation"]),
+                f"FCF − SBC (Mrd. {cur_q})": _qb(q["fcf_sbc"]),
             })
         st.dataframe(pd.DataFrame(q_rows), width="stretch", hide_index=True)
         st.caption(f"Einheit: Mrd. {cur_q}; Stichtag = Quartalsende. "
@@ -918,20 +944,34 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
         basis_m = ("TTM" if dcf_m.fcf_basis == "ttm" else "GJ")
         if dcf_m.fcf_basis == "ttm" and dcf_m.ttm_quarter_end:
             basis_m = f"TTM bis {dcf_m.ttm_quarter_end[:7]}"
+        bear_m = dcf_m.scenarios.get("bear")
+        bull_m = dcf_m.scenarios.get("bull")
+        vps_bear_m = bear_m.value_per_share if bear_m is not None else float("nan")
+        vps_bull_m = bull_m.value_per_share if bull_m is not None else float("nan")
+        mos_bear_m = (1.0 - price / vps_bear_m
+                      if (price is not None and vps_bear_m == vps_bear_m and vps_bear_m > 0)
+                      else float("nan"))
+        mos_bull_m = (1.0 - price / vps_bull_m
+                      if (price is not None and vps_bull_m == vps_bull_m and vps_bull_m > 0)
+                      else float("nan"))
         mode_rows.append({
             "Modus": label,
             "Basis": basis_m,
             f"Start-FCF n. SBC (Mrd. {cur})": "n/a" if dcf_m.fcf_normalized != dcf_m.fcf_normalized
             else f"{dcf_m.fcf_normalized_conv / 1e9:,.2f}",
             "Wert je Aktie (Base)": "n/a" if vps_m != vps_m else f"{vps_m:,.2f} {cur}",
+            "Wert je Aktie (Bear)": "n/a" if vps_bear_m != vps_bear_m else f"{vps_bear_m:,.2f} {cur}",
+            "Wert je Aktie (Bull)": "n/a" if vps_bull_m != vps_bull_m else f"{vps_bull_m:,.2f} {cur}",
             "Kurs": "n/a" if price is None else f"{price:,.2f} {cur}",
             "MoS (Base)": "n/a" if mos_m != mos_m else f"{mos_m:.1%}",
+            "MoS (Bear)": "n/a" if mos_bear_m != mos_bear_m else f"{mos_bear_m:.1%}",
+            "MoS (Bull)": "n/a" if mos_bull_m != mos_bull_m else f"{mos_bull_m:.1%}",
             "Aktiv": "●" if dcf_m.fcf_mode == dcf.fcf_mode else "",
         })
     st.dataframe(pd.DataFrame(mode_rows), width="stretch", hide_index=True)
     st.caption("Startwert des DCF umschaltbar (config.yaml `dcf.fcf_mode`, Default 'auto': "
                "TTM falls plausibel, sonst Ø letzte 3 GJ). '●' markiert den aktiven Modus. "
-               "MoS (Base) = 1 − Kurs / Wert je Aktie (Base) je Modus. "
+               "MoS je Szenario = 1 − Kurs / Wert je Aktie je Modus (Bear/Base/Bull). "
                "Einheit Start-FCF: Mrd. in Marktkapitalisierungs-Währung.")
 
     # --- Sensitivitaetstabelle: MoS (Base) ueber Diskontsatz x Terminal Growth ---
@@ -1105,6 +1145,72 @@ def page_import() -> None:
             st.session_state.pop("imported_companies", None)
             st.session_state.pop("live_tickers", None)
             st.rerun()
+
+    # v28 (Schritt 8): Universumslader -- S&P 500 (Wikipedia -> tickers_sp500.csv)
+    # und STOXX 600 (CSV-Import). Abruf in Batches mit Fortschrittsanzeige,
+    # Wiederaufnahme nach Abbruch, Fehlerlog je Ticker.
+    st.divider()
+    st.subheader("Universumslader (Schritt 8)")
+    ucfg = CFG.get("universe", {})
+    ucol1, ucol2 = st.columns(2)
+    with ucol1:
+        st.markdown("**S&P 500** (Wikipedia-Tabelle -> `tickers_sp500.csv`)")
+        refresh = st.checkbox("S&P-500-Liste neu von Wikipedia laden", value=False)
+        if st.button("S&P 500 laden (Batches, yfinance)"):
+            from data.universe import load_sp500_tickers, load_universe
+            with st.spinner("Lade S&P-500-Liste …"):
+                try:
+                    sp500 = load_sp500_tickers(ucfg.get("sp500_csv", "tickers_sp500.csv"),
+                                               ucfg.get("sp500_wikipedia_url", ""),
+                                               refresh=refresh)
+                except Exception as exc:
+                    st.error(f"S&P-500-Liste konnte nicht geladen werden: {exc}")
+                    sp500 = []
+            if sp500:
+                prog = st.progress(0.0, text="Lade S&P 500 …")
+                status = st.empty()
+
+                def _cb(done, total, ticker):
+                    prog.progress(done / max(1, total), text=f"[{done}/{total}] {ticker}")
+                    status.caption(f"Zuletzt: {ticker}")
+
+                with st.spinner(f"Lade {len(sp500)} Ticker in Batches …"):
+                    companies_u, errors_u = load_universe(sp500, CFG, progress_cb=_cb)
+                st.session_state["imported_companies"] = companies_u
+                st.session_state["live_tickers"] = sp500
+                st.success(f"S&P 500: {len(companies_u)} Ticker geladen, "
+                           f"{len(errors_u)} Fehler (siehe Fehlerlog). Weiter zu Seite 1/2.")
+                if errors_u:
+                    with st.expander(f"Fehlerlog ({len(errors_u)} Ticker)"):
+                        st.dataframe(pd.DataFrame(errors_u), width="stretch", hide_index=True)
+    with ucol2:
+        st.markdown("**STOXX 600** (CSV-Import -> `tickers_stoxx600.csv`)")
+        st.caption(f"CSV mit Spalte `ticker` (Default: `{ucfg.get('stoxx600_csv', 'tickers_stoxx600.csv')}`).")
+        stoxx_csv = st.text_input("STOXX-600-CSV-Pfad", value=ucfg.get("stoxx600_csv", "tickers_stoxx600.csv"))
+        if st.button("STOXX 600 laden (Batches, yfinance)"):
+            from data.universe import load_stoxx600_tickers, load_universe
+            try:
+                stoxx = load_stoxx600_tickers(stoxx_csv)
+            except Exception as exc:
+                st.error(f"STOXX-600-CSV konnte nicht gelesen werden: {exc}")
+                stoxx = []
+            if stoxx:
+                prog = st.progress(0.0, text="Lade STOXX 600 …")
+                status = st.empty()
+
+                def _cb2(done, total, ticker):
+                    prog.progress(done / max(1, total), text=f"[{done}/{total}] {ticker}")
+                    status.caption(f"Zuletzt: {ticker}")
+
+                with st.spinner(f"Lade {len(stoxx)} Ticker in Batches …"):
+                    companies_u, errors_u = load_universe(stoxx, CFG, progress_cb=_cb2)
+                st.session_state["imported_companies"] = companies_u
+                st.session_state["live_tickers"] = stoxx
+                st.success(f"STOXX 600: {len(companies_u)} Ticker geladen, "
+                           f"{len(errors_u)} Fehler (siehe Fehlerlog). Weiter zu Seite 1/2.")
+                if errors_u:
+                    with st.expander(f"Fehlerlog ({len(errors_u)} Ticker)"):
+                        st.dataframe(pd.DataFrame(errors_u), width="stretch", hide_index=True)
 
 
 # --- App ---------------------------------------------------------------------
