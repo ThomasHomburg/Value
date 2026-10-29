@@ -48,6 +48,31 @@ def test_dcf_result_hat_alle_felder():
     assert not missing, f"DcfResult fehlen Felder: {sorted(missing)}"
 
 
+def test_dcf_result_felder_werden_tatsaechlich_gelesen():
+    """v25: Jedes Attribut, das pipeline.py oder app.py von DcfResult liest,
+    muss in der Klasse DEFINIERT sein -- dynamisch aus dem Quelltext
+    ermittelt (statt handgepflegter Liste). Fängt Mischstaende wie
+    'pipeline.py aus TTM-Branch, dcf.py aus aelterem Stand'."""
+    import re
+    from pathlib import Path
+
+    from valuation.dcf import DcfResult
+
+    root = Path(__file__).resolve().parents[1]
+    fields = set(DcfResult.__dataclass_fields__)
+    used = set()
+    for fname in ("scoring/pipeline.py", "app.py"):
+        src = (root / fname).read_text(encoding="utf-8")
+        # dcf.<attr> und dcf_m.<attr> (app.py: Startwert-Modi-Schleife)
+        used |= set(re.findall(r"\bdcf(?:_m)?\.(\w+)", src))
+    # 'scenarios' ist ein dict -- .get(...) darauf ist ok; Rest muessen Felder sein
+    missing = used - fields - {"scenarios"}
+    assert not missing, (
+        f"pipeline.py/app.py lesen DcfResult-Attribute, die nicht definiert "
+        f"sind: {sorted(missing)} (Mischstand Branch/aelterer dcf.py?)"
+    )
+
+
 def test_evaluate_all_demo_alle_ticker_ohne_ausnahme(cfg):
     """evaluate_all ueber alle Demo-Ticker: keine Ausnahme, Rows vollstaendig."""
     companies = demo_companies()
