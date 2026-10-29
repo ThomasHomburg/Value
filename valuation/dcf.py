@@ -1,0 +1,184 @@
+"""DCF-Modul: innerer Wert je Aktie mit 3 Szenarien (Bear / Base / Bull).
+
+Nach CLAUDE.md (Build-Schritt 6), aber mit normalisiertem FCF nach SBC
+(Durchschnitt der letzten 3 Jahre mit verfuegbaren Daten):
+
+- Basis: normalisierter FCF = Ø FCF-SBC der letzten 3 Jahre (fcf_sbc je Jahr).
+- Wachstum Jahre 1-5: Bear 0 %, Base = min(Umsatz-CAGR ueber verfuegbare
+  Jahre, base_growth_cap), Bull = min(CAGR x bull_growth_multiplier,
+  bull_growth_cap).
+- Wachstum Jahre 6-10: linear abnehmend von der Jahr-5-Rate auf
+  terminal_growth (fade_to_growth).
+- Terminal Value = FCF_10 x (1 + g) / (r - g); Diskontsatz r aus Config
+  (discount_rate bzw. discount_rate_cyclicals).
+- Innerer Wert = Barwert der FCFs (Jahre 1-10) + Barwert Terminal Value.
+- Innerer Wert je Aktie = Innerer Wert / verwässerte Aktien (neuestes FY).
+- Margin of Safety (Base) = 1 - Kurs / innerer Wert je Aktie (Base).
+
+Alle Parameter kommen aus config.yaml (Block `dcf`), keine Magic Numbers.
+Fehlende Daten -> NaN, nie 0 (CLAUDE.md).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+
+from data.loader import TickerMetrics
+
+
+@dataclass
+class DcfScenario:
+    name: str                      # "bear" | "base" | "bull"
+    growth_rates: list[float]      # 10 Wachstumsraten (Jahre 1-10)
+    fcfs: list[float]              # projizierte FCFs (Jahre 1-10), Berichtswährung
+    pv_fcfs: float                 # Barwert der 10 FCFs
+    terminal_value: float          # Barwert des Terminal Value (abgezinst)
+    enterprise_value: float        # pv_fcfs + terminal_value
+    value_per_share: float         # EV / Aktien (NaN wenn keine Aktienanzahl)
+
+
+@dataclass
+class DcfResult:
+    fcf_normalized: float          # Ø FCF-SBC letzte 3 Jahre (absolut, Berichtswährung)
+    fcf_years_used: int            # Anzahl verwendeter Jahre
+    revenue_cagr: float            # Umsatz-CAGR ueber verfuegbare Jahre (Basis-Wachstum)
+    discount_rate: float
+    terminal_growth: float
+    shares: float                  # verwässerte Aktien, neuestes FY
+    scenarios: dict[str, DcfScenario] = field(default_factory=dict)
+    margin_of_safety: float = float("nan")   # MoS Base = 1 - Kurs / Wert je Aktie (Base)
+    is_buy: bool = False           # Kaufkandidat (Score/MoS/Bear-Regeln, siehe pipeline)
+
+
+def _cagr(values: list[float]) -> float:
+    """Jaehrliche Wachstumsrate ueber n-1 Jahre (chronologisch)."""
+    if len(values) < 2 or values[0] <= 0:
+        return float("nan")
+    n = len(values) - 1
+    return (values[-1] / values[0]) ** (1 / n) - 1
+
+
+def _growth_path(g5: float, g_terminal: float, cfg: dict) -> list[float]:
+    """10 Wachstumsraten: Jahre 1-5 konstant g5, Jahre 6-10 linear auf g_terminal."""
+    fade = float(cfg.get("fade_to_growth", g_terminal))
+    rates = [g5] * 5
+    for i in range(1, 6):  # Jahre 6-10: linear von g5 auf fade
+        t = i / 5.0
+        rates.append(g5 + (fade - g5) * t)
+    return rates
+
+
+def _pv(fcf: float, rate: float, year: int) -> float:
+    return fcf / (1.0 + rate) ** year
+
+
+def compute_dcf(m: TickerMetrics, cfg: dict, fx=None) -> DcfResult:
+    """Berechnet den DCF fuer einen Ticker nach Config-Block `cfg['dcf']`.
+
+    fx: optionaler FX-Converter (wie in data/metrics.py) — der normalisierte
+    FCF wird in die Marktkap.-Währung konvertiert, damit Kurs und Wert
+    konsistent sind.
+    """
+    dcfg = cfg["dcf"]
+    nan = float("nan")
+    result = DcfResult(
+        fcf_normalized=nan, fcf_years_used=0, revenue_cagr=nan,
+        discount_rate=float(dcfg.get("discount_rate", 0.09)),
+        terminal_growth=float(dcfg.get("terminal_growth", 0.025)),
+        shares=nan,
+    )
+
+    # --- normalisierter FCF nach SBC: Ø der letzten 3 Jahre mit Daten -------
+    sbc_series = [m.years[fy]["fcf_sbc"] for fy in sorted(m.years)
+                  if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
+    if not sbc_series:
+        return result
+    last3 = sbc_series[-3:]
+    fcf_norm = sum(x.value for x in last3) / len(last3)
+    result.fcf_normalized = fcf_norm
+    result.fcf_years_used = len(last3)
+
+    # --- Umsatz-CAGR ueber verfuegbare Jahre (Basis-Wachstum) ---------------
+    rev_series = [m.years[fy]["revenue"] for fy in sorted(m.years)
+                  if "revenue" in m.years[fy] and not m.years[fy]["revenue"].is_na()]
+    rev_vals = [x.value for x in rev_series if x.value > 0]
+    cagr = _cagr(rev_vals) if len(rev_vals) >= 2 else nan
+    result.revenue_cagr = cagr
+
+    # --- Aktienanzahl (verwässert, neuestes FY) -----------------------------
+    for fy in sorted(m.years, reverse=True):
+        sh = m.years[fy].get("shares_diluted")
+        if sh is not None and not sh.is_na() and sh.value > 0:
+            result.shares = sh.value
+            break
+
+    # --- Szenario-Wachstumsraten ---------------------------------------------
+    base_cap = float(dcfg.get("base_growth_cap", 0.06))
+    bull_mult = float(dcfg.get("bull_growth_multiplier", 1.3))
+    bull_cap = float(dcfg.get("bull_growth_cap", 0.10))
+    g_terminal = result.terminal_growth
+    if cagr != cagr:  # NaN -> kein Wachstum bestimmbar
+        g_bear, g_base, g_bull = 0.0, 0.0, 0.0
+    else:
+        g_bear = 0.0
+        g_base = min(cagr, base_cap)
+        g_bull = min(cagr * bull_mult, bull_cap)
+
+    # --- FX: FCF in Marktkap.-Waehrung konvertieren (Kurs und Wert konsistent)
+    mcap = m.market_cap
+    if mcap is None or mcap.is_na() or mcap.value <= 0:
+        return result
+    converter = fx
+    if converter is None:
+        from data.metrics import _NoFX
+        converter = _NoFX()
+    latest_fy = max(m.years)
+    fcf_cur = sbc_series[-1].currency
+    fcf_conv = converter.convert(fcf_norm, fcf_cur, mcap.currency, latest_fy)
+    if math.isnan(fcf_conv):
+        return result
+
+    for name, g5 in (("bear", g_bear), ("base", g_base), ("bull", g_bull)):
+        rates = _growth_path(g5, g_terminal, dcfg)
+        fcfs, fcf_t = [], fcf_conv
+        for g in rates:
+            fcf_t = fcf_t * (1.0 + g)
+            fcfs.append(fcf_t)
+        r = result.discount_rate
+        pv_fcfs = sum(_pv(f, r, i + 1) for i, f in enumerate(fcfs))
+        tv = fcfs[-1] * (1.0 + g_terminal) / (r - g_terminal) if r > g_terminal else nan
+        tv_pv = _pv(tv, r, 10) if tv == tv else nan
+        ev = pv_fcfs + tv_pv if tv_pv == tv_pv else nan
+        vps = ev / result.shares if (ev == ev and result.shares == result.shares) else nan
+        result.scenarios[name] = DcfScenario(
+            name=name, growth_rates=rates, fcfs=fcfs, pv_fcfs=pv_fcfs,
+            terminal_value=tv_pv, enterprise_value=ev, value_per_share=vps,
+        )
+
+    # --- Margin of Safety (Base) ----------------------------------------------
+    base = result.scenarios.get("base")
+    if base is not None and base.value_per_share == base.value_per_share and base.value_per_share > 0:
+        price = mcap.value / result.shares if result.shares == result.shares else nan
+        if price == price and price > 0:
+            result.margin_of_safety = 1.0 - price / base.value_per_share
+    return result
+
+
+def is_buy_candidate(score: float, dcf: DcfResult, current_price: float, cfg: dict) -> bool:
+    """Kaufkandidat (CLAUDE.md): Score >= buy_score_min UND MoS (Base) >=
+    buy_margin_of_safety_min UND Bear-Szenario >= Kurs x buy_bear_floor."""
+    dcfg = cfg["dcf"]
+    if score != score or dcf.margin_of_safety != dcf.margin_of_safety:
+        return False
+    if current_price != current_price or current_price <= 0:
+        return False
+    if score < float(dcfg.get("buy_score_min", 70)):
+        return False
+    if dcf.margin_of_safety < float(dcfg.get("buy_margin_of_safety_min", 0.30)):
+        return False
+    bear = dcf.scenarios.get("bear")
+    if bear is None or bear.value_per_share != bear.value_per_share:
+        return False
+    floor = float(dcfg.get("buy_bear_floor", 0.80))
+    return bear.value_per_share >= floor * current_price

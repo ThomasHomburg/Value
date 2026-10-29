@@ -1,0 +1,186 @@
+"""yfinance-Provider: alle Nicht-US-Ticker (und US als Fallback).
+
+Liefert das normalisierte Schema (TickerMetrics) mit Quelle 'yfinance'.
+yfinance-Row-Labels -> interne Kennzahl-Felder (Mapping siehe _ROW_MAP).
+Waehrung = Quote-Waehrung des Tickers (SAP.DE -> EUR, NOVO-B.CO -> DKK).
+Alle Betraege absolut (nicht Mio.). Fehlende Werte -> NaN, nie 0.
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+
+from data.loader import Metric, TickerMetrics
+from data.providers.base import ProviderError
+
+logger = logging.getLogger("value_screener.providers.yfinance")
+
+# yfinance-Row-Label -> internes Kennzahl-Feld.
+# Jede Kennzahl hat mehrere Label-Fallbacks: yfinance nennt die Zeilen je nach
+# Quelle/Sprache unterschiedlich ("Income Tax Expense" vs. "Tax Provision",
+# "Diluted Average Shares" vs. "Diluted Average Shares"); erstes gefundenes
+# Label gewinnt.
+_ROW_MAP = {
+    "revenue": ["Total Revenue", "Operating Revenue"],
+    "gross_profit": ["Gross Profit"],
+    "ebit": ["Operating Income", "EBIT"],
+    "ebitda": ["EBITDA", "Normalized EBITDA"],
+    "net_income": ["Net Income", "Net Income Common Stockholders"],
+    "interest_expense": ["Interest Expense", "Net Interest Income", "Interest Expense Non Operating"],
+    "income_tax_expense": ["Income Tax Expense", "Tax Provision"],
+    "income_before_tax": ["Pretax Income", "Income Before Tax"],
+    "shares_diluted": ["Diluted Average Shares", "Diluted Average Shares"],
+    "equity": ["Stockholders Equity", "Total Equity Gross Minority Interest"],
+    "_total_debt": ["Total Debt"],
+    "net_debt": ["Net Debt"],
+    "_cash": ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
+    "operating_cashflow": ["Operating Cash Flow", "Cash Flow From Continuing Operating Activities"],
+    "capex": ["Capital Expenditure", "Purchase Of PPE"],
+    "stock_based_compensation": ["Stock Based Compensation", "Stock Based Compensation"],
+    "_fcf_reported": ["Free Cash Flow"],
+}
+
+
+def _nan() -> float:
+    return float("nan")
+
+
+def _pick(df, labels: list[str], col) -> float:
+    """Erstes vorhandenes Fallback-Label; fehlend -> NaN."""
+    for label in labels:
+        v = _cell(df, label, col)
+        if not math.isnan(v):
+            return v
+    return _nan()
+
+
+def _cell(df, row_label: str, col) -> float:
+    """Wert einer yfinance-Zelle/Spalte; fehlend -> NaN."""
+    try:
+        if row_label in df.index and col in df.columns:
+            v = df.loc[row_label, col]
+            if v is None or (isinstance(v, float) and math.isnan(v)):
+                return _nan()
+            return float(v)
+    except (KeyError, TypeError, ValueError):
+        pass
+    return _nan()
+
+
+class YfinanceProvider:
+    """Provider fuer yfinance (Yahoo Finance); deckt alle Laender ab."""
+
+    name = "yfinance"
+
+    def __init__(self) -> None:
+        self._yf = None  # lazy import, damit Tests ohne yfinance laufen
+
+    def _module(self):
+        if self._yf is None:
+            try:
+                import yfinance as yf
+            except ImportError as exc:
+                raise ProviderError("yfinance nicht installiert (pip install yfinance)") from exc
+            self._yf = yf
+        return self._yf
+
+    def supports(self, ticker: str) -> bool:
+        return True
+
+    def load(self, ticker: str, years: int = 5) -> TickerMetrics:
+        yf = self._module()
+        tk = yf.Ticker(ticker)
+        info = tk.info or {}
+        financials = tk.financials
+        balance = tk.balance_sheet
+        cashflow = tk.cashflow
+
+        if financials is None or financials.empty:
+            raise ProviderError(f"yfinance: keine Daten fuer {ticker}")
+
+        currency = (info.get("currency") or info.get("financialCurrency") or "USD").upper()
+        mcap = info.get("marketCap")
+
+        result = TickerMetrics(ticker=ticker.upper())
+        result.name = info.get("longName") or info.get("shortName") or ""
+        result.sector = info.get("sector") or "Unbekannt"
+        result.country = info.get("country") or ""
+        result.source = self.name
+        if mcap is not None:
+            # marketCap in Quote-Waehrung, absolut (wie FMP mktCap)
+            result.market_cap = Metric("market_cap", float(mcap), currency, currency,
+                                       int(financials.columns[0].year))
+            from datetime import date
+            result.market_cap_date = date.today().isoformat()  # Stichtag: Abrufdatum
+
+        # Spalten sind Timestamps (Jahresende); auf int-Jahr mappen, juengste zuerst
+        cols = sorted(financials.columns, reverse=True)[:years]
+        all_cols = {
+            "inc": sorted(getattr(financials, "columns", []), reverse=True)[:years],
+            "bal": sorted(getattr(balance, "columns", []), reverse=True)[:years] if balance is not None and not balance.empty else [],
+            "cf": sorted(getattr(cashflow, "columns", []), reverse=True)[:years] if cashflow is not None and not cashflow.empty else [],
+        }
+
+        for fy in sorted({int(c.year) for c in cols} | {int(c.year) for c in all_cols["bal"]} | {int(c.year) for c in all_cols["cf"]}):
+            year_metrics: dict[str, Metric] = {}
+
+            inc_col = next((c for c in all_cols["inc"] if int(c.year) == fy), None)
+            bal_col = next((c for c in all_cols["bal"] if int(c.year) == fy), None)
+            cf_col = next((c for c in all_cols["cf"] if int(c.year) == fy), None)
+
+            if inc_col is not None:
+                for key in ("revenue", "gross_profit", "ebit", "ebitda", "net_income",
+                            "interest_expense", "income_tax_expense", "income_before_tax",
+                            "shares_diluted"):
+                    year_metrics[key] = Metric(key, _pick(financials, _ROW_MAP[key], inc_col),
+                                               "currency" if key != "shares_diluted" else "shares",
+                                               currency, fy)
+            if bal_col is not None:
+                for key in ("equity", "_total_debt", "net_debt", "_cash"):
+                    year_metrics[key] = Metric(key, _pick(balance, _ROW_MAP[key], bal_col),
+                                               "currency", currency, fy)
+            if cf_col is not None:
+                for key in ("operating_cashflow", "capex", "stock_based_compensation", "_fcf_reported"):
+                    year_metrics[key] = Metric(key, _pick(cashflow, _ROW_MAP[key], cf_col),
+                                               "currency", currency, fy)
+
+            # Nettoverschuldung: yfinance 'Net Debt' bevorzugt; sonst Total Debt - Cash
+            nd = year_metrics.get("net_debt")
+            if nd is not None and math.isnan(nd.value):
+                td = year_metrics.get("_total_debt")
+                cash = year_metrics.get("_cash")
+                if td is not None and cash is not None and not math.isnan(td.value) and not math.isnan(cash.value):
+                    nd.value = td.value - cash.value
+                elif td is not None and not math.isnan(td.value) and (cash is None or math.isnan(cash.value)):
+                    nd.value = td.value
+            if nd is not None:
+                nd.name = "net_debt"
+
+            # FCF: yfinance 'Free Cash Flow' bevorzugt; sonst OCF + Capex (Capex i. d. R. negativ)
+            fcf_m = year_metrics.get("_fcf_reported")
+            ocf = year_metrics.get("operating_cashflow")
+            capex = year_metrics.get("capex")
+            if fcf_m is not None and not math.isnan(fcf_m.value):
+                fcf_val = fcf_m.value
+            elif ocf is not None and capex is not None and not math.isnan(ocf.value) and not math.isnan(capex.value):
+                fcf_val = ocf.value + capex.value  # Capex bei yfinance negativ
+            else:
+                fcf_val = _nan()
+            year_metrics["fcf"] = Metric("fcf", fcf_val, currency, currency, fy)
+
+            # FCF nach SBC = FCF - Aktienverguetung; fehlende SBC -> NaN, nie 0
+            sbc = year_metrics.get("stock_based_compensation")
+            sbc_val = sbc.value if sbc is not None else _nan()
+            fcf_sbc = fcf_val - sbc_val if not (math.isnan(fcf_val) or math.isnan(sbc_val)) else _nan()
+            year_metrics["fcf_sbc"] = Metric("fcf_sbc", fcf_sbc, currency, currency, fy)
+
+            # Interest Expense: yfinance berichtet teils negativ -> Betrag
+            ie = year_metrics.get("interest_expense")
+            if ie is not None and not math.isnan(ie.value):
+                ie.value = abs(ie.value)
+
+            result.years[fy] = year_metrics
+
+        logger.info("%s: %d Jahre von yfinance geladen (Waehrung %s)", ticker, len(result.years), currency)
+        return result

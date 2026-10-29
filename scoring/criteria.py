@@ -1,0 +1,252 @@
+"""Kriterien-Berechnung fuer den Value-Score (alle Schwellen in config.yaml).
+
+Je Kriterium eine Funktion, die ein CriterionResult zurueckgibt:
+- value: Kennzahl (NaN wenn nicht berechenbar)
+- is_na: Datenbasis zu duenn (config: data.min_points_*)
+- years_available: Jahre mit verwertbaren Eingangsdaten
+- thin: True wenn years_available < data.thin_years -> "Daten duenn"
+
+Historienfenster: 5 Jahre (config: data.years). CAGR ueber 5 Punkte
+(= Wachstum ueber 4 Jahre innerhalb des 5-J-Fensters).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass
+from typing import Any, Callable
+
+from data.loader import TickerMetrics
+from data.metrics import fcf_yield_sbc, roic, roe
+
+
+@dataclass
+class CriterionResult:
+    value: float
+    is_na: bool
+    years_available: int = 0
+    thin: bool = False
+
+
+Calc = Callable[[TickerMetrics, dict, Any], CriterionResult]
+
+
+def _values(metrics: TickerMetrics, name: str) -> list[tuple[int, float]]:
+    """[(Jahr, Wert)] chronologisch, ohne NaN."""
+    out = []
+    for m in metrics.series(name):
+        if not m.is_na():
+            out.append((m.fiscal_year, m.value))
+    return out
+
+
+def _year_count(metrics: TickerMetrics, *names: str) -> int:
+    """Jahre, in denen ALLE genannten Kennzahlen einen Wert haben."""
+    counts = [len(_values(metrics, n)) for n in names]
+    return min(counts) if counts else 0
+
+
+def _avg(values: list[float]) -> float:
+    return sum(values) / len(values) if values else float("nan")
+
+
+def _cagr(values: list[float]) -> float:
+    """Jaehrliche Wachstumsrate ueber n-1 Jahre (chronologisch)."""
+    if len(values) < 2 or values[0] <= 0:
+        return float("nan")
+    n = len(values) - 1
+    return (values[-1] / values[0]) ** (1 / n) - 1
+
+
+def _slope(values: list[float]) -> float:
+    """Steigung pro Jahr via kleinste Quadrate; Index = Jahr (0, 1, 2, ...)."""
+    n = len(values)
+    if n < 2:
+        return float("nan")
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(values) / n
+    num = sum((x - mx) * (y - my) for x, y in zip(xs, values))
+    den = sum((x - mx) ** 2 for x in xs)
+    return num / den if den else float("nan")
+
+
+def _result(value: float, is_na: bool, years_available: int, thin_years: int) -> CriterionResult:
+    return CriterionResult(
+        value=value,
+        is_na=is_na,
+        years_available=years_available,
+        thin=years_available < thin_years,
+    )
+
+
+# --- Kriterien ---
+
+def calc_roic_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "ebit")
+    vals = [roic(m, fy) for fy, _ in _values(m, "ebit")]
+    vals = [v for v in vals if v == v]
+    if len(vals) < cfg["min_points_5y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_avg(vals[-5:]), False, years, thin)
+
+
+def calc_roe_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "net_income")
+    vals = [roe(m, fy) for fy, _ in _values(m, "net_income")]
+    vals = [v for v in vals if v == v]
+    if len(vals) < cfg["min_points_5y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_avg(vals[-5:]), False, years, thin)
+
+
+def calc_net_debt_ebitda(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "net_debt", "ebitda")
+    nd = [v for _, v in _values(m, "net_debt")]
+    eb = [v for _, v in _values(m, "ebitda")]
+    if not nd or not eb:
+        return _result(float("nan"), True, years, thin)
+    return _result(nd[-1] / eb[-1] if eb[-1] else float("nan"), False, years, thin)
+
+
+def calc_interest_coverage(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "ebit", "interest_expense")
+    ebit = [v for _, v in _values(m, "ebit")]
+    interest = [v for _, v in _values(m, "interest_expense")]
+    if not ebit or not interest:
+        return _result(float("nan"), True, years, thin)
+    return _result(ebit[-1] / abs(interest[-1]) if interest[-1] else float("nan"), False, years, thin)
+
+
+def calc_fcf_positive_years(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "fcf")
+    vals = [v for _, v in _values(m, "fcf")]
+    if len(vals) < cfg["min_points_5y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(float(sum(1 for v in vals[-10:] if v > 0)), False, years, thin)
+
+
+def calc_fcf_margin_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    thin = cfg["thin_years"]
+    years = _year_count(m, "fcf", "revenue")
+    fcf = dict(_values(m, "fcf"))
+    rev = dict(_values(m, "revenue"))
+    margins = [v / rev[fy] for fy, v in fcf.items() if fy in rev and rev[fy] != 0]
+    if len(margins) < cfg["min_points_5y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_avg(margins[-5:]), False, years, thin)
+
+
+def calc_gross_margin_trend(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Bruttomarge-Trend: Steigung in Prozentpunkten pro Jahr (Hestoer 5 J.).
+
+    CLAUDE.md: 'steigend' -> volle Punkte, 'stark fallend' -> Null Punkte;
+    Schwellen in config.yaml (full: 0.0, zero: -0.5) beziehen sich auf
+    Prozentpunkte pro Jahr: -0.5 PP/Jahr = stark fallend.
+    """
+    thin = cfg["thin_years"]
+    years = _year_count(m, "gross_profit", "revenue")
+    gp = dict(_values(m, "gross_profit"))
+    rev = dict(_values(m, "revenue"))
+    margins = [gp[fy] / rev[fy] for fy in sorted(set(gp) & set(rev)) if rev[fy] != 0]
+    if len(margins) < cfg["min_points_10y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_slope(margins) * 100, False, years, thin)
+
+
+def calc_revenue_cagr_5y(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Umsatz-CAGR ueber das 5-Jahres-Fenster (5 Punkte = 4 Jahre Wachstum)."""
+    thin = cfg["thin_years"]
+    years = _year_count(m, "revenue")
+    vals = [v for _, v in _values(m, "revenue")]
+    if len(vals) < cfg["cagr_min_points"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_cagr(vals[-5:]), False, years, thin)
+
+
+def calc_fcf_yield_sbc_avg3(m: TickerMetrics, cfg, fx) -> CriterionResult:
+    """FCF-Yield nach SBC im 3-Jahres-Durchschnitt.
+
+    FCF-SBC = FCF - Aktienverguetung (Cashflow-Statement). Loest den Roh-FCF-Yield
+    im Value-Score ab; fehlende SBC -> NaN (nie 0) -> Kriterium n/a.
+    """
+    thin = cfg["thin_years"]
+    years = _year_count(m, "fcf_sbc")
+    if m.market_cap is None or m.market_cap.is_na():
+        return _result(float("nan"), True, years, thin)
+    fcf = _values(m, "fcf_sbc")
+    yields = []
+    for fy, v in fcf[-3:]:
+        y = fcf_yield_sbc(m, fy, fx=fx)
+        if y == y:
+            yields.append(y)
+    if len(yields) < cfg["min_points_3y"]:
+        return _result(float("nan"), True, years, thin)
+    return _result(_avg(yields), False, years, thin)
+
+
+def calc_ev_ebit_vs_median(m: TickerMetrics, cfg, fx) -> CriterionResult:
+    """Aktuelles EV/EBIT im Verhaeltnis zum eigenen Median (Fenster 5 J.).
+
+    EV = Marktkap. + Nettoverschuldung (Marktkap. in Quote-Waehrung,
+    Nettoverschuldung in Berichtswaehrung -> FX-Konvertierung noetig;
+    ohne Kurs n/a).
+    """
+    thin = cfg["thin_years"]
+    years = _year_count(m, "ebit", "net_debt")
+    if m.market_cap is None or m.market_cap.is_na():
+        return _result(float("nan"), True, years, thin)
+    ratios = []
+    for fy in sorted(m.years, reverse=True):
+        ebit = m.years[fy].get("ebit")
+        nd = m.years[fy].get("net_debt")
+        if ebit is None or nd is None or ebit.is_na() or nd.is_na() or ebit.value <= 0:
+            continue
+        nd_conv = nd.value if nd.currency == m.market_cap.currency else (
+            fx.convert(nd.value, nd.currency, m.market_cap.currency, fy) if fx else float("nan")
+        )
+        if nd_conv != nd_conv:
+            continue
+        ev = m.market_cap.value + nd_conv
+        ratios.append((fy, ev / ebit.value))
+    if len(ratios) < cfg["min_points_5y"]:
+        return _result(float("nan"), True, years, thin)
+    current_fy = max(fy for fy, _ in ratios)
+    current = next(r for fy, r in ratios if fy == current_fy)
+    median_vals = sorted(r for _, r in ratios)
+    mid = len(median_vals) // 2
+    median = median_vals[mid] if len(median_vals) % 2 else (median_vals[mid - 1] + median_vals[mid]) / 2
+    if median <= 0:
+        return _result(float("nan"), True, years, thin)
+    return _result(current / median, False, years, thin)
+
+
+CRITERIA: dict[str, Calc] = {
+    "roic_avg5": calc_roic_avg5,
+    "roe_avg5": calc_roe_avg5,
+    "net_debt_ebitda": calc_net_debt_ebitda,
+    "interest_coverage": calc_interest_coverage,
+    "fcf_positive_years": calc_fcf_positive_years,
+    "fcf_margin_avg5": calc_fcf_margin_avg5,
+    "gross_margin_trend": calc_gross_margin_trend,
+    "revenue_cagr_5y": calc_revenue_cagr_5y,
+    "fcf_yield_sbc_avg3": calc_fcf_yield_sbc_avg3,
+    "ev_ebit_vs_median": calc_ev_ebit_vs_median,
+}
+
+
+def compute_criteria(m: TickerMetrics, cfg: dict, fx=None) -> dict[str, CriterionResult]:
+    data_cfg = cfg.get("data", {})
+    calc_cfg = {
+        "thin_years": data_cfg.get("thin_years", 5),
+        "min_points_5y": data_cfg.get("min_points_5y", 3),
+        "min_points_3y": data_cfg.get("min_points_3y", 2),
+        "min_points_10y": data_cfg.get("min_points_10y", 5),
+        "cagr_min_points": data_cfg.get("cagr_min_points", 5),
+    }
+    return {name: calc(m, calc_cfg, fx) for name, calc in CRITERIA.items()}
