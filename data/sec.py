@@ -50,9 +50,8 @@ class SecCheckResult:
 
 
 def _cik_for_ticker(ticker: str) -> str | None:
-    """CIK zur Ticker-Symbol via SEC submissions-API (einmalig, cached)."""
-    url = f"https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany&ticker={ticker}&type=10-K&dateb=&owner=include&count=1&output=atom"
-    # Einfacher: company_tickers.json (SEC, statisch, alle Symbole)
+    """CIK zur Ticker-Symbol via SEC company_tickers.json (einmalig, cached)."""
+    _rate_limit()
     try:
         with urllib.request.urlopen(
                 urllib.request.Request(
@@ -68,14 +67,30 @@ def _cik_for_ticker(ticker: str) -> str | None:
 
 
 _UA_CACHE = {"ua": None}
+# v32: Rate-Limit -- Zeitstempel des letzten SEC-Requests (max. N pro Sekunde)
+_LAST_REQ = {"t": 0.0}
+_MAX_RPS = {"v": 5.0}
 
 
 def _user_agent_default() -> str:
     return _UA_CACHE["ua"] or "Value-Screener research@example.com"
 
 
+def _rate_limit() -> None:
+    """v32: wartet, bis der Mindestabstand 1/max_requests_per_second seit dem
+    letzten SEC-Request vergangen ist (default 5/s -> 0,2 s)."""
+    import time as _time
+    min_gap = 1.0 / max(0.1, _MAX_RPS["v"])
+    now = _time.monotonic()
+    wait = _LAST_REQ["t"] + min_gap - now
+    if wait > 0:
+        _time.sleep(wait)
+    _LAST_REQ["t"] = _time.monotonic()
+
+
 def _fetch_companyfacts(cik: str, user_agent: str) -> dict | None:
     url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+    _rate_limit()
     try:
         req = urllib.request.Request(url, headers={"User-Agent": user_agent})
         with urllib.request.urlopen(req, timeout=30) as r:
@@ -140,6 +155,8 @@ def sec_check(m: TickerMetrics, cfg: dict) -> SecCheckResult:
     tol = float(sec_cfg.get("tolerance", 0.05))
     user_agent = str(sec_cfg.get("user_agent") or _user_agent_default())
     _UA_CACHE["ua"] = user_agent
+    # v32: Rate-Limit aus config (default 5/s)
+    _MAX_RPS["v"] = float(sec_cfg.get("max_requests_per_second", 5.0))
 
     country = (m.country or "").upper()
     if country not in ("US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"):

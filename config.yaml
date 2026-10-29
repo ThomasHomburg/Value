@@ -316,6 +316,8 @@ sec:
   user_agent: "Value-Screener research@example.com"
   enabled: true               # false = Abgleich deaktivieren
   tolerance: 0.05             # Flag "Quellen weichen ab" ab > 5 % Abweichung je Jahr
+  max_requests_per_second: 5  # v32: Rate-Limit gegen data.sec.gov (SEC-Policy: max. 10/s,
+                              # wir bleiben bei 5/s; Mindestabstand 1/5 s zwischen Requests)
 
 universe:
   # v28 (Schritt 8): Universumslader.

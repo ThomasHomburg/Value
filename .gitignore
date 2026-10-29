@@ -6,3 +6,5 @@ __pycache__/
 .venv/
 .universe_cache.json
 tickers_stoxx600.csv
+.ranking_cache.json
+ranking_*.csv

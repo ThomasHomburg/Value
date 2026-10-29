@@ -49,6 +49,7 @@ python3 -m streamlit run app.py
 ```bash
 python3 run_ranking.py                     # tickers.csv über Provider (FMP/yfinance)
 python3 run_ranking.py AAPL SAP.DE NOVO-B.CO
+python3 run_ranking.py --tickers tickers_sp500.csv --out ranking_sp500.csv   # v32: Volllauf S&P 500 (Batches, Cache, CSV)
 python3 check_providers.py                 # Rohwerte (FCF, Marktkap., ROIC) für AAPL SAP.DE ASML.AS NOVO-B.CO
 ```
 
