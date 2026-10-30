@@ -33,6 +33,9 @@ _ROW_MAP = {
     "shares_diluted": ["Diluted Average Shares", "Diluted Average Shares"],
     "equity": ["Stockholders Equity", "Total Equity Gross Minority Interest"],
     "_total_debt": ["Total Debt"],
+    # v36: Fallback-Zeilen fuer Schulden, wenn 'Total Debt' fehlt (z. B. XOM)
+    "_long_term_debt": ["Long Term Debt"],
+    "_short_term_debt": ["Short Term Debt", "Short Long Term Debt"],
     "net_debt": ["Net Debt"],
     "_cash": ["Cash And Cash Equivalents", "Cash Cash Equivalents And Short Term Investments"],
     "_short_term_investments": ["Short Term Investments",
@@ -170,7 +173,8 @@ class YfinanceProvider:
                                                currency, fy)
             if bal_col is not None:
                 for key in ("equity", "_total_debt", "net_debt", "_cash", "_short_term_investments",
-                            "_restricted_cash", "customer_deposits"):
+                            "_restricted_cash", "customer_deposits",
+                            "_long_term_debt", "_short_term_debt"):  # v36: Debt-Fallbacks
                     year_metrics[key] = Metric(key, _pick(balance, _ROW_MAP[key], bal_col),
                                                "currency", currency, fy)
             if cf_col is not None:

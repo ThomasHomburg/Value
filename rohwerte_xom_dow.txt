@@ -1,0 +1,128 @@
+rohwerte_xom_dow.txt -- Rohwerte fuer XOM und DOW (live, wie die App)
+Erzeugt von rohwerte_check.py; SEC-Abgleich aktiv wie in config.yaml (sec.enabled=True)
+====================================================================================================
+
+########## XOM -- ExxonMobil Holdings Corporation | Industry: Oil & Gas Integrated | Sektor: Energy | Land: United States | Quelle: yfinance ##########
+
+Marktkapitalisierung: 766.38 Mrd. USD (Stichtag Abrufdatum: 2026-10-30)
+Verwaesserte Aktien (neuestes FY): 4.31 Mrd.
+Kurs (Marktkap. / Aktien): 178.02 USD
+
+Cashflow je Geschaeftsjahr (Mrd. USD):
+  FY            OCF      Capex        FCF        SBC    FCF-SBC
+  2021          n/a        n/a        n/a        n/a        n/a
+  2022   76.80 Mrd. -18.41 Mrd. 58.39 Mrd.        n/a        n/a
+  2023   55.37 Mrd. -21.92 Mrd. 33.45 Mrd.        n/a        n/a
+  2024   55.02 Mrd. -24.31 Mrd. 30.72 Mrd.        n/a        n/a
+  2025   51.97 Mrd. -28.36 Mrd. 23.61 Mrd.        n/a        n/a
+
+Nettoverschuldung (neuestes Jahr mit Bilanzdaten):
+  FY2025 gemeldet (net_debt): 26.54 Mrd. USD
+  FY2025 Hinweis: 'Total Debt' fehlt bei Yahoo -> Summe Long+Short Term Debt = 27.93 Mrd.
+  FY2025 Schulden - Cash - kurzfr. Anlagen: 17.25 Mrd. USD (Schulden 27.93 Mrd., Cash 10.68 Mrd., kurzfr. Anlagen 0.00 Mrd.)
+  DCF verwendet (ohne Kundengelder, reported): 31.78 Mrd. -- TTM (Stichtag 2026-06-30)
+
+DCF je Startwert-Modus (Start-FCF, Wert je Aktie Bear/Base/Bull, MoS Base):
+  Modus         Start-FCF  Wert/Aktie Bear       Base       Bull   MoS Base  MoS bei 10%
+  avg3         29.26 Mrd.            86.78      57.10      50.18    -211.7%          n/a
+  latest       23.61 Mrd.            68.84      44.89      39.31    -296.5%          n/a
+  ttm          31.57 Mrd.            92.91      60.89      53.42    -192.4%          n/a
+  ttm_only     30.55 Mrd.            89.67      58.69      51.46    -203.3%          n/a
+  aktiver Modus (dcf.fcf_mode=auto): MoS Base -192.4%, MoS bei 10 % (robust) -237.9%
+  Umsatz-CAGR (Basis-Wachstum): -6.7% | Diskontsatz 9.0% | Terminal Growth 2.5%
+
+EBIT, Steuersatz, NOPAT, Eigenkapital, ROIC je Jahr:
+  FY      EBIT (Mrd.)   Steuer  NOPAT (Mrd.)    EK (Mrd.)     ROIC
+  2021            n/a      n/a           n/a          n/a      n/a
+  2022     64.03 Mrd.    25.9%    47.41 Mrd.  195.05 Mrd.    23.3%
+  2023     44.46 Mrd.    29.2%    31.46 Mrd.  204.80 Mrd.    14.9%
+  2024     39.65 Mrd.    28.3%    28.45 Mrd.  263.70 Mrd.    10.2%
+  2025     33.94 Mrd.    27.9%    24.48 Mrd.  259.39 Mrd.     8.6%
+
+Quality-/Value-Kriterien (Rohwert, Schwellen full/zero aus config.yaml, Punkte 0-100):
+  Kriterium                       Rohwert     full     zero   Punkte  n/a Jahre
+  ev_ebit_vs_median                1.2603   0.6000   1.2000      0.0          4
+  fcf_margin_avg5                  0.1025   0.3000   0.0300     26.8          4
+  fcf_positive_years               1.0000   1.0000   0.5000    100.0          4
+  fcf_yield_sbc_avg3                  n/a   0.0800   0.0200      n/a   ja     0
+  gross_margin_trend              -1.4093   0.0000  -0.5000      0.0          4
+  interest_coverage               56.2819  10.0000   3.0000    100.0          4
+  mos_base                        -1.9235   0.4000   0.0000      0.0          5
+  net_debt_ebitda                  0.3911   1.0000   4.0000    100.0          4
+  normalized_earnings              8.9588  15.0000   3.0000     49.7          4
+  revenue_cagr_5y                 -0.0669   0.1500   0.0000      0.0          4
+  roe_avg5                         0.1751   0.3000   0.0800     43.2          4
+  roic_avg5                        0.1425   0.3500   0.0800     23.2          4
+
+Quality=52.7  Value=0.0  Datenabdeckung=80.0%  Score=39.5  Status=nein  Gruppe=cyclicals
+Flags: valu:duenn duenn SBC n/a (ohne SBC) zyk:norm<7J
+
+########## DOW -- Dow Inc. | Industry: Chemicals | Sektor: Basic Materials | Land: United States | Quelle: yfinance ##########
+
+Marktkapitalisierung: 25.14 Mrd. USD (Stichtag Abrufdatum: 2026-10-30)
+Verwaesserte Aktien (neuestes FY): 0.71 Mrd.
+Kurs (Marktkap. / Aktien): 35.33 USD
+
+Cashflow je Geschaeftsjahr (Mrd. USD):
+  FY            OCF      Capex        FCF        SBC    FCF-SBC
+  2021          n/a        n/a        n/a        n/a        n/a
+  2022    7.47 Mrd. -2.06 Mrd.  5.42 Mrd.        n/a        n/a
+  2023    5.20 Mrd. -2.48 Mrd.  2.72 Mrd.        n/a        n/a
+  2024    2.91 Mrd. -3.06 Mrd. -0.15 Mrd.        n/a        n/a
+  2025    1.03 Mrd. -2.48 Mrd. -1.45 Mrd.        n/a        n/a
+
+Nettoverschuldung (neuestes Jahr mit Bilanzdaten):
+  FY2025 gemeldet (net_debt): 13.22 Mrd. USD
+  FY2025 Schulden - Cash - kurzfr. Anlagen: 15.78 Mrd. USD (Schulden 19.60 Mrd., Cash 3.82 Mrd., kurzfr. Anlagen 0.00 Mrd.)
+  DCF verwendet (ohne Kundengelder, reported): 12.35 Mrd. -- TTM (Stichtag 2026-09-30)
+
+DCF je Startwert-Modus (Start-FCF, Wert je Aktie Bear/Base/Bull, MoS Base):
+  Modus         Start-FCF  Wert/Aktie Bear       Base       Bull   MoS Base  MoS bei 10%
+  avg3          0.37 Mrd.           -11.40     -14.79     -15.45        n/a          n/a
+  latest       -1.45 Mrd.           -46.38     -33.24     -30.68        n/a          n/a
+  ttm           1.58 Mrd.            12.98      -1.36      -4.16        n/a          n/a
+  ttm_only      2.17 Mrd.            24.30       4.61       0.77    -666.1%          n/a
+  aktiver Modus (dcf.fcf_mode=auto): MoS Base n/a, MoS bei 10 % (robust) n/a
+  Umsatz-CAGR (Basis-Wachstum): -11.1% | Diskontsatz 9.0% | Terminal Growth 2.5%
+
+EBIT, Steuersatz, NOPAT, Eigenkapital, ROIC je Jahr:
+  FY      EBIT (Mrd.)   Steuer  NOPAT (Mrd.)    EK (Mrd.)     ROIC
+  2021            n/a      n/a           n/a          n/a      n/a
+  2022      5.70 Mrd.    23.8%     4.34 Mrd.   20.72 Mrd.    13.8%
+  2023      2.10 Mrd.    21.0%     1.66 Mrd.   18.61 Mrd.     5.6%
+  2024      1.91 Mrd.    24.9%     1.43 Mrd.   17.36 Mrd.     4.7%
+  2025      0.16 Mrd.    21.0%     0.12 Mrd.   16.01 Mrd.     0.4%
+
+Quality-/Value-Kriterien (Rohwert, Schwellen full/zero aus config.yaml, Punkte 0-100):
+  Kriterium                       Rohwert     full     zero   Punkte  n/a Jahre
+  ev_ebit_vs_median               12.9651   0.6000   1.2000      0.0          4
+  fcf_margin_avg5                  0.0291   0.3000   0.0300      0.0          4
+  fcf_positive_years               0.5000   1.0000   0.5000      0.0          4
+  fcf_yield_sbc_avg3                  n/a   0.0800   0.0200      n/a   ja     0
+  gross_margin_trend              -2.6354   0.0000  -0.5000      0.0          4
+  interest_coverage                0.1827  10.0000   3.0000      0.0          4
+  mos_base                            n/a   0.4000   0.0000      n/a   ja     5
+  net_debt_ebitda                  4.4181   1.0000   4.0000      0.0          4
+  normalized_earnings              1.2872  15.0000   3.0000      0.0          4
+  revenue_cagr_5y                 -0.1111   0.1500   0.0000      0.0          4
+  roe_avg5                         0.0383   0.3000   0.0800      0.0          4
+  roic_avg5                        0.0612   0.3500   0.0800      0.0          4
+
+Quality=n/a  Value=n/a  Datenabdeckung=60.0%  Score=n/a  Status=nein  Gruppe=cyclicals
+Flags: valu:duenn duenn sec:abweichend SBC n/a (ohne SBC) zyk:norm<7J ND != Schulden - Cash
+Datenqualitaet:
+  - Datenabdeckung 60% < 70%
+  - SEC-Abweichung: Capex FY2023 +5.1%; Capex FY2022 +12.9%
+  - FY2025: ND (13.2 Mrd.) weicht von Schulden-Cash (15.8 Mrd.) um 2.6 Mrd. ab (> 5% Marktkap.)
+
+====================================================================================================
+ERKLAERUNG (3 Saetze je Ticker)
+
+XOM (MoS < -100 %):
+  Der DCF ergibt je nach Startwert-Modus einen inneren Wert von nur 44.89 bis 60.89 USD je Aktie
+  (Start-FCF 23.6-31.6 Mrd. USD ohne SBC, Nettoverschuldung 31.8 Mrd., Umsatz-CAGR -6.7% -> Base-Wachstum 0 %),
+  der reale Kurs liegt mit 178.02 USD beim etwa 2.9- bis 4.0-Fachen dieses Werts, daher MoS = 1 - Kurs/Wert = -297% bis -192%.
+
+DOW (Quality n/a):
+  10 Kriterien mit 0 Punkten und 2 n/a (fcf_yield_sbc_avg3, mos_base; u. a. CAGR -11.1%, ND/EBITDA 4.42, Zinsdeckung 0.18, FCF positiv in 50% der Jahre),
+  sodass die Datenabdeckung mit 60% unter der Schwelle min_coverage_quality von 70 % liegt und der Quality-Score deshalb als n/a ausgewiesen wird.
