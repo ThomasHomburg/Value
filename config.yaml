@@ -309,6 +309,11 @@ dcf:
   base_growth_cap: 0.06
   bull_growth_multiplier: 1.3
   bull_growth_cap: 0.10
+  # v37 (1): Szenario-Wachstum bei CAGR < 0 (schrumpfendes Unternehmen):
+  #   Base = CAGR (negativ, unbegrenzt), Bear = CAGR - bear_negative_spread,
+  #   Bull = 0 % (keine Erholung). Bei CAGR >= 0 unveraendert:
+  #   Bear 0 %, Base = min(CAGR, base_growth_cap), Bull = min(CAGR*mult, bull_growth_cap).
+  bear_negative_spread: 0.03  # 3 Prozentpunkte unter Base bei CAGR < 0
   fade_to_growth: 0.025
   fcf_avg_years: 3
   fcf_mode: auto              # DCF-Startwert: auto (TTM falls plausibel, sonst O3J)
@@ -344,7 +349,9 @@ sec:
   # v36 (2): Capex-Definitionspruefung -- weicht Capex laut SEC in mind. N Jahren
   # um mehr als `tolerance` ab -> Status "Pruefen (Capex-Definition)", nie Kandidat.
   capex_check:
-    tolerance: 0.20           # Abweichung > 20 % je Jahr (Capex Yahoo vs. SEC)
+    # v37 (3): Pruefstatus, wenn |Yahoo-Capex - SEC-Capex| in mind. min_years
+    # Jahren mehr als `ocf_share` des OCF betraegt (nicht mehr rel. Abweichung).
+    ocf_share: 0.10           # Differenz > 10 % des OCF je Jahr
     min_years: 2              # in mind. 2 betroffenen Jahren -> Pruefstatus
 
 consistency:

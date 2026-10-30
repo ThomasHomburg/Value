@@ -51,6 +51,8 @@ APP_ROW_COLUMNS = {
     # v36: MoS bei 10 % (robust), Capex-Pruefstatus, Bilanz-Konsistenz, Zykliker-Cap
     "mos_robust", "mos_robust_rate", "status_pruefen_capex", "capex_dev_years",
     "nd_inconsistent", "zyk_unnorm",
+    # v37: Quality-Abdeckung nur ueber Quality-Bloecke
+    "quality_coverage",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen
@@ -62,6 +64,8 @@ DCF_RESULT_FIELDS = {
     "net_debt", "net_debt_source", "customer_deposits", "fcf_mode",
     # v26: umschaltbare Nettoverschuldung
     "net_debt_mode", "net_debt_alt", "net_debt_alt_source", "mos_base_alt",
+    # v37 (1): tatsaechliche Wachstumsraten je Szenario
+    "scenario_growth",
 }
 
 

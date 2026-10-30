@@ -113,8 +113,9 @@ def test_capex_pruefstatus_ab_2_jahren(cfg, monkeypatch):
     cfg2 = _cfg(cfg, sec_enabled=True)
     m = _mk(ticker="CAT", mcap=2e11)  # guenstig -> waere sonst Kandidat
     monkeypatch.setattr(secmod, "_cik_for_ticker", lambda t: "0000018230")
+    # v37: Diff = |ours - ours/(1+dev)| = 0.75*ours (~5.1 Mrd.) > 10 % OCF (~3.8 Mrd.)
     monkeypatch.setattr(secmod, "_fetch_companyfacts",
-                        lambda cik, ua: _facts_capex({2024: 0.30, 2023: 0.50}))
+                        lambda cik, ua: _facts_capex({2024: 3.0, 2023: 3.0}))
     out = evaluate_ticker(m, cfg2)
     row = out["row"]
     assert row["status_pruefen_capex"] is True
@@ -126,13 +127,21 @@ def test_capex_pruefstatus_ab_2_jahren(cfg, monkeypatch):
 
 
 def test_capex_unter_schwelle_kein_pruefstatus(cfg, monkeypatch):
-    """Nur 1 Jahr > 20 % (min_years=2) oder <= 20 % -> kein Pruefstatus."""
+    """v37: 2 Jahre, aber Diff <= 10 % des OCF -> kein Pruefstatus; sowie nur
+    1 Jahr mit grossem Diff -> min_years=2 nicht erreicht."""
     import data.sec as secmod
     cfg2 = _cfg(cfg, sec_enabled=True)
     m = _mk(ticker="DE", mcap=2e11)
     monkeypatch.setattr(secmod, "_cik_for_ticker", lambda t: "0000106047")
+    # 2 Jahre, aber Diff je Jahr < 10 % des OCF (dev 0.10 -> Diff ~0.45 % rev < 2.8 % rev)
     monkeypatch.setattr(secmod, "_fetch_companyfacts",
-                        lambda cik, ua: _facts_capex({2024: 0.25}))  # nur 1 Jahr
+                        lambda cik, ua: _facts_capex({2024: 0.10, 2023: 0.10}))
+    out = evaluate_ticker(m, cfg2)
+    assert out["row"]["status_pruefen_capex"] is False
+    assert out["row"]["status"] != "Prüfen (Capex-Definition)"
+    # nur 1 Jahr mit grossem Diff -> min_years=2 nicht erreicht
+    monkeypatch.setattr(secmod, "_fetch_companyfacts",
+                        lambda cik, ua: _facts_capex({2024: 3.0}))
     out = evaluate_ticker(m, cfg2)
     assert out["row"]["status_pruefen_capex"] is False
     assert out["row"]["status"] != "Prüfen (Capex-Definition)"
@@ -145,7 +154,8 @@ def test_capex_schwelle_in_config(cfg):
     from pathlib import Path
     raw = yaml.safe_load((Path(__file__).resolve().parents[1] / "config.yaml")
                          .read_text(encoding="utf-8"))
-    assert raw["sec"]["capex_check"]["tolerance"] == 0.20
+    # v37: Schwelle als Anteil des OCF (nicht mehr relativ zur Capex-Zahl)
+    assert raw["sec"]["capex_check"]["ocf_share"] == 0.10
     assert raw["sec"]["capex_check"]["min_years"] == 2
     assert raw["consistency"]["net_debt_mcap_share"] == 0.05
     assert raw["dcf"]["robust_discount_rate"] == 0.10

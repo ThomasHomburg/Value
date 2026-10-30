@@ -1,6 +1,6 @@
-"""v35 Testlauf: dieselben 25 Ticker wie im letzten Lauf (Seed 42), live.
+"""v37 Testlauf: dieselben 28 Ticker wie im v36-Lauf (25 Seed 42 + PYPL, V, MA), live.
 
-Erzeugt testlauf_25.csv (mit neuen Spalten Industry-Gruppe + SEC-Detail) und
+Erzeugt testlauf_25.csv (v37: + Spalte Quality-Abdeckung) und
 testlauf_fehler.txt (Fehler + Datenqualitaet je Ticker). Kein Volllauf.
 """
 import csv
@@ -78,8 +78,8 @@ def main():
     rows.sort(key=lambda r: -(r["score"] if r["score"] == r["score"] else -1))
 
     cols = ["Ticker", "Industry", "Industry-Gruppe", "Status (alle Modi)", "Status (jüngste 2)",
-            "Quality", "Value", "Datenabdeckung", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM",
-            "MoS bei 10%", "SEC", "SEC-Detail", "Flags"]
+            "Quality", "Quality-Abdeckung", "Value", "Datenabdeckung", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM",
+            "MoS bei 10%", "SEC", "SEC-Detail", "Flags"]  # v37: + Quality-Abdeckung (nur Quality-Blöcke)
     with open("testlauf_25.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -90,7 +90,7 @@ def main():
             w.writerow([
                 r["ticker"], r.get("industry", ""), r.get("sector_group", ""),
                 r["status_all"], r["status_recent2"],
-                fmt_v(r["quality"]), fmt_v(r["value"]), fmt_cov(r["coverage"]),
+                fmt_v(r["quality"]), fmt_cov(r.get("quality_coverage", float("nan"))), fmt_v(r["value"]), fmt_cov(r["coverage"]),
                 fmt_mos(r["mos_avg3"], special), fmt_mos(r["mos_latest"], special),
                 fmt_mos(r["mos_ttm"], special), fmt_mos(r["mos_ttm_only"], special),
                 fmt_mos(r.get("mos_robust", float("nan")), special),

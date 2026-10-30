@@ -230,8 +230,9 @@ def page_ranking() -> None:
     min_cov_q = float(CFG.get("score_groups", {}).get("min_coverage_quality", 0.70))
     view["Quality"] = view.apply(
         lambda r: "n/a" if (r["quality"] != r["quality"]
-                            or (r["coverage"] == r["coverage"] and r["coverage"] < min_cov_q))
-        else f"{r['quality']:.1f}", axis=1)
+                            or (r.get("quality_coverage", r["coverage"]) == r.get("quality_coverage", r["coverage"])
+                                and r.get("quality_coverage", r["coverage"]) < min_cov_q))
+        else f"{r['quality']:.1f}", axis=1)  # v37: Quality-Abdeckung nur Quality-Bloecke
     view = view.rename(columns={"ticker": "Ticker", "name": "Name", "sector": "Sektor",
                                 "source": "Quelle", "score": "Score",
                                 "flags": "Flags"})
@@ -291,7 +292,7 @@ def page_ranking() -> None:
         "Land": st.column_config.TextColumn("Land", help="Land als Kürzel (US, DE, ...)"),
         "Quelle": st.column_config.TextColumn("Quelle", help="Datenquelle (yfinance / fmp / demo)"),
         "Score": st.column_config.NumberColumn("Score", help="Gesamtscore = 0,75×Quality + 0,25×Value (0–100)", format="%.1f"),
-        "Quality": st.column_config.TextColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat; n/a wenn Datenabdeckung < score_groups.min_coverage_quality (70 %)"),
+        "Quality": st.column_config.TextColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat; n/a wenn Quality-Abdeckung (nur Quality-Blöcke) < score_groups.min_coverage_quality (70 %)"),
         "Quality-Rang": st.column_config.TextColumn("Quality-Rang", help="Rang nach Quality-Score im Universum (1 = bester); Gleichstand = gleicher Rang; n/a = Quality nicht berechenbar"),
         "Value": st.column_config.TextColumn("Value", help="Value-Score (0–100); n/a wenn Datenabdeckung < score_groups.min_coverage_value (70 %)"),
         "Datenabdeckung": st.column_config.TextColumn("Datenabdeckung", help="Anteil bewerteter Kriterien-Gewichte (n/a-Kriterien herausgerechnet, übrige renormalisiert)"),
@@ -934,8 +935,14 @@ def dcf_section(m: TickerMetrics, row: dict | None) -> None:
         f"{basis_note} · "
         f"Umsatz-CAGR (verfügbare Jahre): {cagr_s} · "
         f"Verwässerte Aktien: {dcf.shares / 1e9:,.2f} Mrd. · "
-        "Wachstum: Bear 0 % (J. 1–5) · Base = min(CAGR, "
-        f"{cap:.0%}) · Bull = min(CAGR × {mult:.1f}, {bull_cap:.0%}); "
+        f"Wachstum J. 1–5 je Szenario (tatsächlich): "
+        + " · ".join(
+            f"{n.capitalize()} {dcf.scenario_growth.get(n, float('nan')):.1%}"
+            if dcf.scenario_growth.get(n, float("nan")) == dcf.scenario_growth.get(n, float("nan"))
+            else f"{n.capitalize()} n/a"
+            for n in ("bear", "base", "bull"))
+        + f" (CAGR ≥ 0: Bear 0 %, Base = min(CAGR, {cap:.0%}), Bull = min(CAGR × {mult:.1f}, {bull_cap:.0%}); "
+        f"CAGR < 0: Base = CAGR, Bear = CAGR − {float(dc.get('bear_negative_spread', 0.03)):.0%}, Bull = 0 %); "
         f"J. 6–10 linear auf {fade:.1%}. Terminal Value = FCF_10 × (1 + g) / (r − g)."
     )
 

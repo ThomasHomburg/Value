@@ -57,14 +57,13 @@ EQIX:
   - Sektor-Sonderregel (REIT - Specialty): DCF/FCF-Yield n/a
 DOW:
   - Datenabdeckung 60% < 70%
-  - SEC-Abweichung: Capex FY2023 +5.1%; Capex FY2022 +12.9%
+  - SEC-Abweichung: Capex FY2023: Yahoo 2.48 / SEC 2.36 Mrd. USD, Diff 0.12 Mrd. = 2.3% des OCF (+5.1%); Capex FY2022: Yahoo 2.06 / SEC 1.82 Mrd. USD, Diff 0.23 Mrd. = 3.1% des OCF (+12.9%)
   - FY2025: ND (13.2 Mrd.) weicht von Schulden-Cash (15.8 Mrd.) um 2.6 Mrd. ab (> 5% Marktkap.)
 CAT:
-  - SEC-Abweichung: Capex FY2025 +51.9%; Capex FY2024 +61.7%; Capex FY2023 +93.6%; Capex FY2022 +100.5%
-  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
+  - SEC-Abweichung: Capex FY2025: Yahoo 4.29 / SEC 2.82 Mrd. USD, Diff 1.47 Mrd. = 12.5% des OCF (+51.9%); Capex FY2024: Yahoo 3.21 / SEC 1.99 Mrd. USD, Diff 1.23 Mrd. = 10.2% des OCF (+61.7%); Capex FY2023: Yahoo 3.09 / SEC 1.60 Mrd. USD, Diff 1.50 Mrd. = 11.6% des OCF (+93.6%); Capex FY2022: Yahoo 2.60 / SEC 1.30 Mrd. USD, Diff 1.30 Mrd. = 16.8% des OCF (+100.5%)
+  - Capex-Diff laut SEC in 4 Jahren > 10% des OCF -> Pruefstatus (Capex-Definition)
 BIIB:
-  - SEC-Abweichung: Capex FY2025 +53.1%; Capex FY2024 +134.1%; Capex FY2023 +12.4%
-  - Capex weicht laut SEC in 2 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
+  - SEC-Abweichung: Capex FY2025: Yahoo 0.24 / SEC 0.15 Mrd. USD, Diff 0.08 Mrd. = 3.7% des OCF (+53.1%); Capex FY2024: Yahoo 0.36 / SEC 0.15 Mrd. USD, Diff 0.21 Mrd. = 7.2% des OCF (+134.1%); Capex FY2023: Yahoo 0.31 / SEC 0.28 Mrd. USD, Diff 0.03 Mrd. = 2.2% des OCF (+12.4%)
 AEE:
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Utilities - Regulated Electric): DCF/FCF-Yield n/a
@@ -72,10 +71,9 @@ DUK:
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Utilities - Regulated Electric): DCF/FCF-Yield n/a
 DE:
-  - SEC-Abweichung: Capex FY2025 +210.9%; Capex FY2024 +192.8%; Capex FY2023 +198.3%; Capex FY2022 +234.0%
-  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
+  - SEC-Abweichung: Capex FY2025: Yahoo 4.23 / SEC 1.36 Mrd. USD, Diff 2.87 Mrd. = 38.5% des OCF (+210.9%); Capex FY2024: Yahoo 4.80 / SEC 1.64 Mrd. USD, Diff 3.16 Mrd. = 34.3% des OCF (+192.8%); Capex FY2023: Yahoo 4.47 / SEC 1.50 Mrd. USD, Diff 2.97 Mrd. = 34.6% des OCF (+198.3%); Capex FY2022: Yahoo 3.79 / SEC 1.13 Mrd. USD, Diff 2.65 Mrd. = 56.5% des OCF (+234.0%)
+  - Capex-Diff laut SEC in 4 Jahren > 10% des OCF -> Pruefstatus (Capex-Definition)
 CARR:
-  - SEC-Abweichung: SBC FY2024 -12.2%; SBC FY2023 -12.3%; Capex FY2023 -6.4%; SBC FY2022 -15.6%; Capex FY2022 -10.2%
+  - SEC-Abweichung: SBC FY2024 -12.2%; SBC FY2023 -12.3%; Capex FY2023: Yahoo 0.44 / SEC 0.47 Mrd. USD, Diff 0.03 Mrd. = 1.2% des OCF (-6.4%); SBC FY2022 -15.6%; Capex FY2022: Yahoo 0.32 / SEC 0.35 Mrd. USD, Diff 0.04 Mrd. = 2.1% des OCF (-10.2%)
 MA:
-  - SEC-Abweichung: Capex FY2025 +148.5%; Capex FY2024 +151.9%; Capex FY2023 +193.3%; Capex FY2022 +148.2%
-  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
+  - SEC-Abweichung: Capex FY2025: Yahoo 1.22 / SEC 0.49 Mrd. USD, Diff 0.73 Mrd. = 4.1% des OCF (+148.5%); Capex FY2024: Yahoo 1.19 / SEC 0.47 Mrd. USD, Diff 0.72 Mrd. = 4.9% des OCF (+151.9%); Capex FY2023: Yahoo 1.09 / SEC 0.37 Mrd. USD, Diff 0.72 Mrd. = 6.0% des OCF (+193.3%); Capex FY2022: Yahoo 1.10 / SEC 0.44 Mrd. USD, Diff 0.66 Mrd. = 5.9% des OCF (+148.2%)

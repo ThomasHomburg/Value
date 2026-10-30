@@ -283,13 +283,17 @@ def sec_sbc_fallback_all(m: TickerMetrics, cfg: dict) -> list[tuple[int, float, 
     return out
 
 
-def format_sec_detail(deviations: list) -> str:
-    """v35: SEC-Abweichungen kompakt als Text: Feld, Jahr, Prozent.
+def format_sec_detail(deviations: list, ocf_by_fy: dict | None = None) -> str:
+    """v35/v37: SEC-Abweichungen kompakt als Text: Feld, Jahr, Prozent.
 
     deviations: [{fy, key, ours, sec, dev}] aus SecCheckResult. Beispiel:
     "OCF FY2024 +6.2%; Capex FY2023 -12.0%". Nur Abweichungen ueber dem
     konfigurierten Toleranzwert (Default 5 %) werden gelistet, aber alle
     uebergebenen Abweichungen formatiert (Aufrufer filtert ggf.).
+
+    ocf_by_fy (v37, optional): {fy: OCF-Betrag} -- dann enthaelt das Capex-Detail
+    zusaetzlich Yahoo-Capex, SEC-Capex und Differenz in Mrd. USD und in % des OCF:
+    "Capex FY2024: Yahoo 3.2 / SEC 2.0 Mrd., Diff 1.2 Mrd. = 15.6% des OCF".
     """
     key_label = {
         "operating_cashflow": "OCF",
@@ -302,5 +306,14 @@ def format_sec_detail(deviations: list) -> str:
         if dev is None or dev != dev:
             continue
         sign = "+" if d.get("ours", 0) >= d.get("sec", 0) else "-"
-        parts.append(f"{key_label.get(d.get('key'), d.get('key'))} FY{d.get('fy')} {sign}{abs(dev):.1%}")
+        label = key_label.get(d.get("key"), d.get("key"))
+        fy = d.get("fy")
+        if d.get("key") == "capex" and ocf_by_fy and fy in ocf_by_fy and ocf_by_fy[fy]:
+            ocf = abs(ocf_by_fy[fy])
+            diff = abs(d.get("ours", 0) - d.get("sec", 0))
+            parts.append(
+                f"{label} FY{fy}: Yahoo {abs(d.get('ours', 0))/1e9:,.2f} / SEC {d.get('sec', 0)/1e9:,.2f} Mrd. USD, "
+                f"Diff {diff/1e9:,.2f} Mrd. = {diff/ocf:.1%} des OCF ({sign}{abs(dev):.1%})")
+        else:
+            parts.append(f"{label} FY{fy} {sign}{abs(dev):.1%}")
     return "; ".join(parts)

@@ -63,6 +63,7 @@ class DcfResult:
     net_debt_alt: float = float("nan")  # alternative Nettoverschuldung (anderer Modus, Berichtsw.)
     net_debt_alt_source: str = ""    # Quelle der alternativen Nettoverschuldung
     mos_base_alt: float = float("nan")   # MoS (Base) mit alternativer Nettoverschuldung
+    scenario_growth: dict = field(default_factory=dict)  # v37 (1): {"bear": g5, "base": g5, "bull": g5}
 
 
 def _cagr(values: list[float]) -> float:
@@ -392,9 +393,16 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     base_cap = float(dcfg.get("base_growth_cap", 0.06))
     bull_mult = float(dcfg.get("bull_growth_multiplier", 1.3))
     bull_cap = float(dcfg.get("bull_growth_cap", 0.10))
+    neg_spread = float(dcfg.get("bear_negative_spread", 0.03))  # v37 (1)
     g_terminal = result.terminal_growth
     if cagr != cagr:  # NaN -> kein Wachstum bestimmbar
         g_bear, g_base, g_bull = 0.0, 0.0, 0.0
+    elif cagr < 0:
+        # v37 (1): schrumpfendes Unternehmen -- Base = CAGR (negativ),
+        # Bear = CAGR - bear_negative_spread, Bull = 0 % (keine Erholung)
+        g_bear = cagr - neg_spread
+        g_base = cagr
+        g_bull = 0.0
     else:
         g_bear = 0.0
         g_base = min(cagr, base_cap)
@@ -441,6 +449,7 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
         sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
                            result.shares, dcfg, net_debt=nd_conv)
         result.scenarios[name] = sc
+        result.scenario_growth[name] = g5  # v37 (1): fuer Erklaertext
 
     # --- Margin of Safety (Base) ----------------------------------------------
     base = result.scenarios.get("base")

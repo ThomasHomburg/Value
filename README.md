@@ -151,8 +151,9 @@ Umsatz = 391035000000 USD). Alle Kennzahlen bleiben absolut; Schwellen in
 - [x] Formel-Anzeige ROIC 5J / FCF-Yield / ND/EBITDA mit Rohwerten (inkl. Referenz UBER/NVDA/KO)
 - [x] FCF-Yield nach SBC (FCF − Aktienverguetung) als Value-Kriterium
 - [x] 6. DCF-Modul mit 3 Szenarien (Bear/Base/Bull), normalisierter FCF nach SBC (Ø 3 J.), MoS Base in der Rangliste, Kaufkandidaten (Quality ≥ 60, MoS ≥ 30 %, Bear ≥ 80 % Kurs)
-- [ ] 7. Sektor-Sonderregeln
-- [ ] 8. Universum erweitern, Batch-Lauf
+- [x] 7. Sektor-Sonderregeln (Banken/Versicherer/REITs/Versorger ueber Industry -> MoS n/a (Sonderregel), Status Sonderregel noetig; PYPL/V/MA bleiben Standardmodell)
+- [x] 8. Universum erweitern, Batch-Lauf (`run_ranking.py --tickers CSV --batch 20 --pause 2 --cache .ranking_cache.json`; Wiederaufnahme + Fehlerlog; Volllauf S&P 500 wartet auf Freigabe)
+- [x] v37: Szenario-Wachstum bei CAGR < 0 (Base = CAGR, Bear = CAGR - 3 pp, Bull = 0 %), Quality-Abdeckung nur ueber Quality-Bloecke (DOW liefert Quality-Score), Capex-Pruefstatus nur wenn Diff > 10 % des OCF in >= 2 Jahren (MA ohne, CAT/DE mit; SEC-Detail in Mrd. USD + % des OCF), Testlauf 28 Ticker neu (testlauf_25.csv + testlauf_fehler.txt)
 
 ## Tests
 

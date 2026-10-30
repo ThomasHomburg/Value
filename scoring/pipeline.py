@@ -299,27 +299,41 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         try:
             from data.sec import sec_check, format_sec_detail
             sec = sec_check(m, cfg)
+            # v37 (3): SEC-Detail mit OCF je Jahr (Capex-Detail in Mrd. + % des OCF)
+            ocf_by_fy = {}
+            for fy in m.years:
+                ocf_m = m.years[fy].get("operating_cashflow")
+                if ocf_m is not None and not ocf_m.is_na():
+                    ocf_by_fy[fy] = ocf_m.value
             if sec.flag:
                 tol = float(cfg.get("sec", {}).get("tolerance", 0.05))
                 devs = [d for d in sec.deviations if d.get("dev", 0) == d.get("dev", 0)
                         and d["dev"] > tol]
-                sec_detail = format_sec_detail(devs)
+                sec_detail = format_sec_detail(devs, ocf_by_fy=ocf_by_fy)
                 flag_parts.append("sec:abweichend")
                 logger.warning("%s: %s | Detail: %s", m.ticker, sec.note, sec_detail)
-            # v36 (2): Capex ueber Schwelle in >= min_years Jahren?
+            # v37 (3): Capex-Regel -- |Yahoo-Capex - SEC-Capex| > ocf_share * OCF
+            # in >= min_years Jahren -> Pruefstatus (nicht mehr rel. Abweichung)
             cap_cfg = cfg.get("sec", {}).get("capex_check", {})
-            cap_tol = float(cap_cfg.get("tolerance", 0.20))
+            cap_ocf_share = float(cap_cfg.get("ocf_share", 0.10))
             cap_min_years = int(cap_cfg.get("min_years", 2))
-            capex_dev_years = [d for d in sec.deviations
-                               if d.get("key") == "capex" and d.get("dev", 0) == d.get("dev", 0)
-                               and d["dev"] > cap_tol]
+            capex_dev_years = []
+            for d in sec.deviations:
+                if d.get("key") != "capex" or d.get("dev", 0) != d.get("dev", 0):
+                    continue
+                fy = d.get("fy")
+                ocf = abs(ocf_by_fy.get(fy, 0.0))
+                diff = abs(d.get("ours", 0.0) - d.get("sec", 0.0))
+                d["diff_ocf_share"] = diff / ocf if ocf else float("nan")
+                if ocf and diff > cap_ocf_share * ocf:
+                    capex_dev_years.append(d)
             if len(capex_dev_years) >= cap_min_years and not special:
                 pruefen_capex = True
                 dcf.is_buy = False  # nie Kandidat bei Capex-Definitionszweifel
                 flag_parts.append("capex:pruefen")
-                logger.warning("%s: Capex weicht laut SEC in %d Jahren um > %.0f%% ab -> "
+                logger.warning("%s: Capex-Diff laut SEC in %d Jahren > %.0f%% des OCF -> "
                                "Status 'Pruefen (Capex-Definition)'; nie Kandidat",
-                               m.ticker, len(capex_dev_years), cap_tol * 100)
+                               m.ticker, len(capex_dev_years), cap_ocf_share * 100)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
     # v36 (3): Zykliker mit weniger als normalize_years Jahren -> Status maximal
@@ -334,8 +348,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     elif pruefen_capex:
         status = status_all = status_recent2 = "Prüfen (Capex-Definition)"
         status_detail = status_all_detail = status_recent2_detail = (
-            f"Capex weicht laut SEC in {len(capex_dev_years)} Jahren um > "
-            f"{float(cfg.get('sec', {}).get('capex_check', {}).get('tolerance', 0.20)):.0%} ab "
+            f"Capex-Diff laut SEC in {len(capex_dev_years)} Jahren > "
+            f"{float(cfg.get('sec', {}).get('capex_check', {}).get('ocf_share', 0.10)):.0%} des OCF "
             f"-> manuell pruefen; nie Kandidat")
     # v35 (2): SBC fehlt UND ohne SBC waere der Ticker Kandidat -> "Pruefen (SBC fehlt)"
     elif pruefen_sbc:
@@ -441,8 +455,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     if pruefen_sbc:
         dq.append("SBC fehlt in allen Jahren -> Pruefstatus (ohne SBC-Kandidat)")
     if pruefen_capex:
-        dq.append(f"Capex weicht laut SEC in {len(capex_dev_years)} Jahren ab "
-                  f"(> {float(cfg.get('sec', {}).get('capex_check', {}).get('tolerance', 0.20)):.0%}) "
+        dq.append(f"Capex-Diff laut SEC in {len(capex_dev_years)} Jahren > "
+                  f"{float(cfg.get('sec', {}).get('capex_check', {}).get('ocf_share', 0.10)):.0%} des OCF "
                   f"-> Pruefstatus (Capex-Definition)")
     if getattr(m, "ebitda_unplausible", False):
         dq.append("EBITDA < EBIT (unplausibel)")
@@ -464,6 +478,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "quality": result["quality"],
         "value": result["value"],
         "coverage": result["coverage"],
+        "quality_coverage": result.get("quality_coverage", result["coverage"]),  # v37 (2)
         "fcf_yield": fcf_yield(m, latest_fy),
         "fcf_yield_sbc": fcf_yield_sbc(m, latest_fy),
         "fcf_yield_3y": criteria["fcf_yield_sbc_avg3"].value,  # nach SBC (Value-Score)
