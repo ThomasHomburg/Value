@@ -152,6 +152,12 @@ def page_ranking() -> None:
     view["MoS (Base)"] = view.apply(
         lambda r: _fmt_mos(r["margin_of_safety"], bool(r.get("dcf_fcf_le0", False)),
                            bool(r.get("sector_special", False))), axis=1)  # v33: Start-FCF <= 0; v35: Sonderregel
+    # v36 (4): MoS bei erhoehtem Diskontsatz (Base, aktiver Modus) -- Robustheit
+    _rrate = float(CFG.get("dcf", {}).get("robust_discount_rate", 0.10))
+    view[f"MoS bei {_rrate:.0%}"] = view.apply(
+        lambda r: _fmt_mos(r.get("mos_robust", float("nan")),
+                           bool(r.get("dcf_fcf_le0", False)),
+                           bool(r.get("sector_special", False))), axis=1)
     # v27: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø / TTM)
     # v35: Sektor-Sonderregel -> "n/a (Sonderregel)" statt n/a
     _sp = view["sector_special"].fillna(False).astype(bool) if "sector_special" in view else False
@@ -180,8 +186,15 @@ def page_ranking() -> None:
     _active_label = ("Kandidat (aktuell)"
                      if CFG["dcf"].get("candidate_mode", "min_all") == "min_recent2"
                      else "Kandidat (streng)")
-    view["Status"] = view["status"].map(
-        lambda v: _active_label if v == "Kandidat" else str(v))
+    _mos_min = float(CFG.get("dcf", {}).get("buy_margin_of_safety_min", 0.30))
+    def _status_robust(r):
+        v = str(r["status"])
+        lbl = _active_label if v == "Kandidat" else v
+        mr = r.get("mos_robust", float("nan"))
+        if mr == mr and mr >= _mos_min and not bool(r.get("sector_special", False)):
+            return f"{lbl} (robust)"  # v36: MoS bei 10 % >= 30 %
+        return lbl
+    view["Status"] = view.apply(_status_robust, axis=1)
     # v28: SEC-EDGAR-Abgleich in der Rangliste sichtbar (US-Ticker)
     def _sec_col(r):
         if r["sec_check_flag"]:
@@ -225,7 +238,7 @@ def page_ranking() -> None:
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
-                 "MoS (Base)", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM", "MoS alt. ND",
+                 "MoS (Base)", f"MoS bei {_rrate:.0%}", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM", "MoS alt. ND",
                  "MoS Bear", "MoS Bull", "Status", "Status (alle Modi)", "Status (jüngste 2)",
                  "Kandidat", "SEC", "Flags"]
     # v27: Standard-Sortierung: Kandidat zuerst, dann Beobachtung, dann MoS (Base) absteigend
@@ -290,11 +303,12 @@ def page_ranking() -> None:
         "ND/EBITDA": st.column_config.TextColumn("ND/EBITDA", help="Nettoverschuldung / EBITDA (x, neuestes Jahr)"),
         "EV/EBIT rel.": st.column_config.TextColumn("EV/EBIT rel.", help="EV/EBIT im Vergleich zum Sektor-Median (1,0 = Median)"),
         "MoS (Base)": st.column_config.TextColumn("MoS (Base)", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Base-Szenario, aktiver Startwert-Modus)"),
+        f"MoS bei {_rrate:.0%}": st.column_config.TextColumn(f"MoS bei {_rrate:.0%}", help=f"MoS (Base) mit erhoehtem Diskontsatz {_rrate:.0%} (dcf.robust_discount_rate), aktiver Startwert-Modus; Status-Zusatz 'robust' wenn >= 30 %"),
         "MoS Ø3J": st.column_config.TextColumn("MoS Ø3J", help="MoS (Base) mit Start-FCF = Ø letzte 3 Geschäftsjahre (nach SBC)"),
         "MoS jüngstes GJ": st.column_config.TextColumn("MoS jüngstes GJ", help="MoS (Base) mit Start-FCF = jüngstes Geschäftsjahr (nach SBC)"),
         "MoS TTM Ø": st.column_config.TextColumn("MoS TTM Ø", help="MoS (Base) mit Start-FCF = Ø TTM + 2 nicht überlappende GJ (nach SBC)"),
         "MoS TTM": st.column_config.TextColumn("MoS TTM", help="MoS (Base) mit Start-FCF = reiner TTM-Start (Summe letzte 4 Quartale, nach SBC, ohne Ø)"),
-        "Status": st.column_config.TextColumn("Status", help="Zwei Stufen: Kandidat (MoS min ≥ 30 %, Quality ≥ 60, Bear ≥ 80 % Kurs) oder Beobachtung (bester Modus ≥ 30 %, aber min < 30 %, Quality ≥ 60); Kandidat nennt den entscheidenden Modus"),
+        "Status": st.column_config.TextColumn("Status", help="Zwei Stufen: Kandidat (MoS min ≥ 30 %, Quality ≥ 60, Bear ≥ 80 % Kurs) oder Beobachtung (bester Modus ≥ 30 %, aber min < 30 %, Quality ≥ 60); Kandidat nennt den entscheidenden Modus; Zusatz '(robust)' = MoS bei 10 % ≥ 30 %; Zykliker < 7 J. max. 'Beobachtung (nicht normalisiert)'"),
         "MoS alt. ND": st.column_config.TextColumn("MoS alt. ND", help="MoS (Base) mit alternativer Nettoverschuldung (anderer Modus: gemeldet vs. Schulden − (Cash + kurzfr. Anlagen))"),
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),

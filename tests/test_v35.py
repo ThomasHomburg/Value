@@ -302,6 +302,8 @@ def test_datenqualitaet_je_ticker(cfg):
     cfg2 = dict(cfg)
     cfg2["sec"] = {"enabled": False}
     m = _mk(ticker="XOM", industry="Oil & Gas Integrated")
+    for fy in m.years:  # v36: Provider liefert das Jahr (Statement-Spalte vorhanden)
+        m.fiscal_ends[fy] = f"{fy}-12-31"
     # Datenluecke erzeugen: FY2023 ohne ebit
     m.years[2023]["ebit"] = Metric("ebit", float("nan"), "USD", "USD", 2023)
     out = evaluate_ticker(m, cfg2)

@@ -19,7 +19,7 @@ logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(mes
 
 TICKERS = ["JPM", "BAC", "GS", "MS", "WFC", "TRV", "AIG", "MET", "AMT", "PLD",
            "EQIX", "XOM", "NEM", "FCX", "DOW", "CAT", "NVDA", "BIIB", "AEE",
-           "ROK", "DUK", "DE", "CSX", "CARR", "RL"]
+           "ROK", "DUK", "DE", "CSX", "CARR", "RL", "PYPL", "V", "MA"]  # v36: + PYPL, V, MA
 
 
 def fmt_mos(v, special=False, le0=False):
@@ -43,17 +43,31 @@ def fmt_cov(c):
 
 
 def main():
+    """v36 (8): echter Batch-Runner -- Batches zu 20 mit Pause, Fortschrittsanzeige,
+    Fehlerlog je Ticker (ein Fehler stoppt den Lauf nicht)."""
+    import time
     cfg = load_config()
     providers = build_providers("")
+    ucfg = cfg.get("universe", {})
+    batch_size = int(ucfg.get("batch_size", 20))
+    pause = float(ucfg.get("batch_pause_seconds", 2.0))
     companies, errors = [], []
-    for i, t in enumerate(TICKERS, 1):
-        try:
-            m = load_with_provider(t, cfg, providers, years=cfg["data"]["years"])
-            companies.append(m)
-            print(f"[{i}/25] {t} geladen ({m.source})", file=sys.stderr)
-        except Exception as exc:
-            errors.append({"ticker": t, "error": str(exc)[:200]})
-            print(f"[{i}/25] {t} FEHLER: {exc}", file=sys.stderr)
+    n = len(TICKERS)
+    for start in range(0, n, batch_size):
+        batch = TICKERS[start:start + batch_size]
+        print(f"=== Batch {start+1}-{min(start+len(batch), n)} von {n} "
+              f"({start}/{n} erledigt) ===", file=sys.stderr)
+        for t in batch:
+            try:
+                m = load_with_provider(t, cfg, providers, years=cfg["data"]["years"])
+                companies.append(m)
+                print(f"  {t} geladen ({m.source})", file=sys.stderr)
+            except Exception as exc:
+                errors.append({"ticker": t, "error": str(exc)[:200]})
+                print(f"  {t} FEHLER: {exc}", file=sys.stderr)
+        if start + batch_size < n:
+            time.sleep(pause)
+    print(f"Laden fertig: {len(companies)} ok, {len(errors)} Fehler", file=sys.stderr)
 
     results = []
     for m in companies:
@@ -65,7 +79,7 @@ def main():
 
     cols = ["Ticker", "Industry", "Industry-Gruppe", "Status (alle Modi)", "Status (jüngste 2)",
             "Quality", "Value", "Datenabdeckung", "MoS Ø3J", "MoS jüngstes GJ", "MoS TTM Ø", "MoS TTM",
-            "SEC", "SEC-Detail", "Flags"]
+            "MoS bei 10%", "SEC", "SEC-Detail", "Flags"]
     with open("testlauf_25.csv", "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -79,6 +93,7 @@ def main():
                 fmt_v(r["quality"]), fmt_v(r["value"]), fmt_cov(r["coverage"]),
                 fmt_mos(r["mos_avg3"], special), fmt_mos(r["mos_latest"], special),
                 fmt_mos(r["mos_ttm"], special), fmt_mos(r["mos_ttm_only"], special),
+                fmt_mos(r.get("mos_robust", float("nan")), special),
                 sec, r.get("sec_detail", ""), r["flags"],
             ])
 
@@ -103,7 +118,7 @@ def main():
         if not any_dq:
             f.write("keine Auffälligkeiten\n")
 
-    print(f"\n{len(rows)} bewertet, {len(excluded)} ausgeschlossen, {len(errors)} Fehler")
+    print(f"\n{len(rows)} bewertet, {len(excluded)} ausgeschlossen, {len(errors)} Fehler (von {len(TICKERS)} Tickern)")
 
 
 if __name__ == "__main__":

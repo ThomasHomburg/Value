@@ -23,6 +23,14 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v36: Capex-Definition, Robustheit (MoS bei 10 %), Bilanz-Konsistenz, Zykliker-Cap, Batch-Runner
+- **Datenlücken** in `testlauf_fehler.txt` nur für Jahre, die der Provider auch liefert (Statement-Spalte vorhanden) — die leere 5. Spalte wird nicht mehr gemeldet.
+- **Capex-Regel** (`sec.capex_check`: `tolerance: 0.20`, `min_years: 2`): Weicht Capex laut SEC in mind. 2 Jahren um > 20 % ab → Status **„Prüfen (Capex-Definition)“**, nie Kandidat, Flag `capex:pruefen`. Live: CAT (51,9–100,5 %), DE (192,8–234,0 %), MA, BIIB — Yahoo `capitalExpenditure` vs. SEC `PaymentsToAcquirePropertyPlantAndEquipment` (Yahoo teils inkl. weiterer Posten).
+- **Zykliker < 7 Jahre**: Status maximal **„Beobachtung (nicht normalisiert)“** (nie Kandidat).
+- **Robustheit**: Spalte **„MoS bei 10 %“** (Base, aktiver Modus, `dcf.robust_discount_rate`); Status-Zusatz **„robust“**, wenn dort ≥ 30 %.
+- **Bilanz-Konsistenz** (`consistency.net_debt_mcap_share: 0.05`): Flag **„ND ≠ Schulden − Cash“**, wenn gemeldete ND um > 5 % der Marktkap. von Total Debt − Cash abweicht (neuestes Jahr). Live: AMT, DOW.
+- **Testlauf als Batch-Runner** (`testlauf_run.py`: Batches zu 20 mit Pause + Fortschritt + Fehlerlog; `run_ranking.py --tickers` seit v32 derselbe Mechanismus): 25 Ticker Seed 42 **plus PYPL, V, MA** = 28 Ticker, **28 bewertet / 0 ausgeschlossen / 0 Fehler**. PYPL ist Kandidat (MoS Ø3J 40,8 %, MoS bei 10 % 30,9 %); V/MA Normalmodell (MA „Prüfen (Capex-Definition)“). XOM MoS −192,9…−297,2 % (Kurs 178,32 vs. Wert/Aktie 44,89–60,89; ND 31,8 Mrd.; CAGR −6,7 %); DOW Wert/Aktie negativ (ND 12,4 Mrd. > EV), Quality n/a (Coverage 60 % < 70 %).
+
 ## v35: Sektor-Sonderregel, SEC-SBC-Fallback, SEC-Detail, Datenqualitaet
 - **Sektor-Sonderregel** (`sector_rules.groups.special.industry_patterns`: `Banks - *`, `Capital Markets`, `Insurance - *`, `REIT - *`, `Utilities - *`): **DCF und FCF-Yield werden nicht berechnet** — MoS-Zellen zeigen **„n/a (Sonderregel)“**, Status **„Sonderregel nötig“** (statt „nein“/„Prüfen“). PYPL/V/MA (Credit Services) bleiben **Normalmodell** (Test in `test_v35.py`). Quality nur aus anwendbaren Kriterien; **„n/a“ bei Abdeckung < 70 %** (`score_groups.min_coverage_quality`).
 - **„Prüfen (SBC fehlt)“ nur noch, wenn ohne SBC Quality ≥ 60 UND MoS ≥ 30 %** — sonst normaler Status (nie Kandidat bleibt bestehen).

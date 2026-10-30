@@ -48,6 +48,9 @@ APP_ROW_COLUMNS = {
     "dcf_sbc_missing", "status_pruefen_sbc", "dcf_fcf_le0", "value_na_below_coverage",
     # v35: Sektor-Sonderregel + SEC-Detail + SBC-SEC-Quelle
     "sector_special", "sec_detail", "sbc_sec_sources", "data_quality",
+    # v36: MoS bei 10 % (robust), Capex-Pruefstatus, Bilanz-Konsistenz, Zykliker-Cap
+    "mos_robust", "mos_robust_rate", "status_pruefen_capex", "capex_dev_years",
+    "nd_inconsistent", "zyk_unnorm",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen
@@ -93,7 +96,8 @@ def test_dcf_result_felder_werden_tatsaechlich_gelesen():
         # dcf.<attr> und dcf_m.<attr> (app.py: Startwert-Modi-Schleife)
         used |= set(re.findall(r"\bdcf(?:_m)?\.(\w+)", src))
     # 'scenarios' ist ein dict -- .get(...) darauf ist ok; Rest muessen Felder sein
-    missing = used - fields - {"scenarios"}
+    # v36: dc.get("robust_discount_rate") ist Config-Zugriff (cfg["dcf"]), kein DcfResult-Attribut
+    missing = used - fields - {"scenarios", "robust_discount_rate"}
     assert not missing, (
         f"pipeline.py/app.py lesen DcfResult-Attribute, die nicht definiert "
         f"sind: {sorted(missing)} (Mischstand Branch/aelterer dcf.py?)"

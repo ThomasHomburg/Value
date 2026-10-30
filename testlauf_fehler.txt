@@ -2,7 +2,6 @@ keine Fehler
 
 === Datenqualität je Ticker ===
 JPM:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - FY2022 Datenluecke: ebit
   - FY2023 Datenluecke: ebit
   - FY2024 Datenluecke: ebit
@@ -10,7 +9,6 @@ JPM:
   - Datenabdeckung 10% < 70%
   - Sektor-Sonderregel (Banks - Diversified): DCF/FCF-Yield n/a
 BAC:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - FY2022 Datenluecke: ebit
   - FY2023 Datenluecke: ebit
   - FY2024 Datenluecke: ebit
@@ -18,7 +16,6 @@ BAC:
   - Datenabdeckung 10% < 70%
   - Sektor-Sonderregel (Banks - Diversified): DCF/FCF-Yield n/a
 GS:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - FY2022 Datenluecke: ebit
   - FY2023 Datenluecke: ebit
   - FY2024 Datenluecke: ebit
@@ -26,7 +23,6 @@ GS:
   - Datenabdeckung 10% < 70%
   - Sektor-Sonderregel (Capital Markets): DCF/FCF-Yield n/a
 MS:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - FY2022 Datenluecke: ebit
   - FY2023 Datenluecke: ebit
   - FY2024 Datenluecke: ebit
@@ -34,7 +30,6 @@ MS:
   - Datenabdeckung 10% < 70%
   - Sektor-Sonderregel (Capital Markets): DCF/FCF-Yield n/a
 WFC:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - FY2022 Datenluecke: ebit
   - FY2023 Datenluecke: ebit
   - FY2024 Datenluecke: ebit
@@ -42,62 +37,45 @@ WFC:
   - Datenabdeckung 10% < 70%
   - Sektor-Sonderregel (Banks - Diversified): DCF/FCF-Yield n/a
 TRV:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Insurance - Property & Casualty): DCF/FCF-Yield n/a
 AIG:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Insurance - Diversified): DCF/FCF-Yield n/a
 MET:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Insurance - Life): DCF/FCF-Yield n/a
 AMT:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (REIT - Specialty): DCF/FCF-Yield n/a
+  - FY2025: ND (35.7 Mrd.) weicht von Schulden-Cash (43.5 Mrd.) um 7.7 Mrd. ab (> 5% Marktkap.)
 PLD:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (REIT - Industrial): DCF/FCF-Yield n/a
 EQIX:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (REIT - Specialty): DCF/FCF-Yield n/a
-XOM:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
-NEM:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
-FCX:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
 DOW:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 60% < 70%
   - SEC-Abweichung: Capex FY2023 +5.1%; Capex FY2022 +12.9%
+  - FY2025: ND (13.2 Mrd.) weicht von Schulden-Cash (15.8 Mrd.) um 2.6 Mrd. ab (> 5% Marktkap.)
 CAT:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - SEC-Abweichung: Capex FY2025 +51.9%; Capex FY2024 +61.7%; Capex FY2023 +93.6%; Capex FY2022 +100.5%
-NVDA:
-  - FY2022 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
+  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
 BIIB:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - SEC-Abweichung: Capex FY2025 +53.1%; Capex FY2024 +134.1%; Capex FY2023 +12.4%
+  - Capex weicht laut SEC in 2 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
 AEE:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Utilities - Regulated Electric): DCF/FCF-Yield n/a
 DUK:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - Datenabdeckung 30% < 70%
   - Sektor-Sonderregel (Utilities - Regulated Electric): DCF/FCF-Yield n/a
 DE:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - SEC-Abweichung: Capex FY2025 +210.9%; Capex FY2024 +192.8%; Capex FY2023 +198.3%; Capex FY2022 +234.0%
-CSX:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
+  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)
 CARR:
-  - FY2021 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
   - SEC-Abweichung: SBC FY2024 -12.2%; SBC FY2023 -12.3%; Capex FY2023 -6.4%; SBC FY2022 -15.6%; Capex FY2022 -10.2%
-RL:
-  - FY2022 Datenluecke: revenue, ebit, net_income, operating_cashflow, equity, fcf
+MA:
+  - SEC-Abweichung: Capex FY2025 +148.5%; Capex FY2024 +151.9%; Capex FY2023 +193.3%; Capex FY2022 +148.2%
+  - Capex weicht laut SEC in 4 Jahren ab (> 20%) -> Pruefstatus (Capex-Definition)

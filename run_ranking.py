@@ -120,7 +120,8 @@ def _write_ranking_csv(rows: list[dict], excluded: list[dict], errors: list[dict
             "margin_of_safety", "mos_rule", "mos_recent2", "mos_avg3", "mos_latest", "mos_ttm",
             "mos_ttm_only", "mos_bear", "mos_bull", "mos_base_alt_nd", "nd_ebitda",
             "roic_5y", "roic_latest", "fcf_yield_3y", "history_years", "flags",
-            "sec_check_ok", "sec_check_flag", "sec_check_note", "sec_detail", "kandidat"]
+            "sec_check_ok", "sec_check_flag", "sec_check_note", "sec_detail", "kandidat",
+            "mos_robust", "status_pruefen_capex", "nd_inconsistent", "zyk_unnorm"]
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)

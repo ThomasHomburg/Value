@@ -102,6 +102,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             and dcf.shares == dcf.shares and dcf.shares > 0):
         price = m.market_cap.value / dcf.shares
 
+    dc = cfg["dcf"]  # v36: vor mos_by_mode/mos_robust benoetigt
     # v27: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø / TTM rein)
     # v35: bei Sektor-Sonderregel kein DCF -> alle MoS NaN ("n/a (Sonderregel)")
     mos_by_mode = {}
@@ -116,8 +117,23 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     mos_ttm = mos_by_mode.get("ttm", float("nan"))
     mos_ttm_only = mos_by_mode.get("ttm_only", float("nan"))
 
+    # v36 (4): MoS bei erhoehtem Diskontsatz (Base, aktiver Startwert-Modus) --
+    # Robustheit: gleiches Szenario mit dcf.robust_discount_rate (Default 10 %)
+    robust_rate = float(dc.get("robust_discount_rate", 0.10))
+    mos_robust = float("nan")
+    if not special:
+        try:
+            cfg_r = dict(cfg)
+            cfg_r["dcf"] = dict(cfg["dcf"])
+            cfg_r["dcf"]["discount_rate"] = robust_rate
+            dcf_r = compute_dcf(m, cfg_r, fcf_mode=dcf.fcf_mode
+                                if dcf.fcf_mode in ("avg3", "latest", "ttm", "ttm_only") else None)
+            mos_robust = dcf_r.margin_of_safety
+        except Exception as exc:
+            logger.warning("%s: Robust-MoS fehlgeschlagen: %s", m.ticker, exc)
+
     # v27: Kandidatenregel nutzt das konfigurierte MoS (min/avg3/latest/ttm/ttm_only/auto)
-    dc = cfg["dcf"]
+    # (dc bereits oben definiert)
     mos_mode = str(dc.get("mos_min_mode", "min")).lower()
     if mos_mode == "min":
         mos_candidates = [v for v in (mos_avg3, mos_latest, mos_ttm, mos_ttm_only) if v == v]
@@ -217,6 +233,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     elif sbc_missing_all and special:
         pruefen_sbc = False  # Sonderregel hat eigenen Status
 
+    # v36 (2): Capex-Definitionspruefung -- SEC-Abgleich laeuft unten (sec);
+    # hier nur vormerken, Auswertung nach sec_check (deviations verfuegbar)
+    pruefen_capex = False
+    capex_dev_years: list[dict] = []
+
     mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
     mos_vals_global = mos_vals
     quality_ok = result["quality"] == result["quality"] and result["quality"] >= quality_min
@@ -240,19 +261,6 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         is_buy_recent2 = (False if sbc_missing_all else
                           is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
         status_recent2, status_recent2_detail = _status_for(mos_recent2, recent2, is_buy_recent2)
-
-    # v35 (1): Sektor-Sonderregel -> Status "Sonderregel noetig" (statt nein/Pruefen)
-    if special:
-        status = status_all = status_recent2 = "Sonderregel nötig"
-        status_detail = status_all_detail = status_recent2_detail = (
-            f"{m.industry}: DCF/FCF-Yield nicht berechnet (Sonderregel)")
-    # v35 (2): SBC fehlt UND ohne SBC waere der Ticker Kandidat -> "Pruefen (SBC fehlt)"
-    elif pruefen_sbc:
-        status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
-        status_detail = status_all_detail = status_recent2_detail = (
-            "SBC fehlt in allen Jahren; ohne SBC Quality ≥ "
-            f"{quality_min:.0f} und MoS ≥ {mos_min:.0%} -> manuell pruefen; nie Kandidat")
-
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
 
@@ -284,6 +292,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                        m.ticker)
     # v26/v35: SEC-EDGAR-Abgleich (US-Ticker) — Abweichung > tolerance -> Flag
     # v35 (4): Details (Feld/Jahr/%) werden in der Row als sec_detail mitgefuehrt
+    # v36 (2): Capex-Definitionspruefung (sec.capex_check: tolerance + min_years)
     sec = None
     sec_detail = ""
     if cfg.get("sec", {}).get("enabled", True):
@@ -297,8 +306,52 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 sec_detail = format_sec_detail(devs)
                 flag_parts.append("sec:abweichend")
                 logger.warning("%s: %s | Detail: %s", m.ticker, sec.note, sec_detail)
+            # v36 (2): Capex ueber Schwelle in >= min_years Jahren?
+            cap_cfg = cfg.get("sec", {}).get("capex_check", {})
+            cap_tol = float(cap_cfg.get("tolerance", 0.20))
+            cap_min_years = int(cap_cfg.get("min_years", 2))
+            capex_dev_years = [d for d in sec.deviations
+                               if d.get("key") == "capex" and d.get("dev", 0) == d.get("dev", 0)
+                               and d["dev"] > cap_tol]
+            if len(capex_dev_years) >= cap_min_years and not special:
+                pruefen_capex = True
+                dcf.is_buy = False  # nie Kandidat bei Capex-Definitionszweifel
+                flag_parts.append("capex:pruefen")
+                logger.warning("%s: Capex weicht laut SEC in %d Jahren um > %.0f%% ab -> "
+                               "Status 'Pruefen (Capex-Definition)'; nie Kandidat",
+                               m.ticker, len(capex_dev_years), cap_tol * 100)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
+    # v36 (3): Zykliker mit weniger als normalize_years Jahren -> Status maximal
+    # "Beobachtung (nicht normalisiert)" (nie Kandidat)
+    zyk_unnorm = (rule.group == "cyclicals" and 0 < norm_years < max(1, rule.normalized_earnings_years))
+    # v35 (1): Sektor-Sonderregel -> Status "Sonderregel noetig" (statt nein/Pruefen)
+    if special:
+        status = status_all = status_recent2 = "Sonderregel nötig"
+        status_detail = status_all_detail = status_recent2_detail = (
+            f"{m.industry}: DCF/FCF-Yield nicht berechnet (Sonderregel)")
+    # v36 (2): Capex-Definition laut SEC in >= min_years Jahren > tolerance -> Pruefstatus
+    elif pruefen_capex:
+        status = status_all = status_recent2 = "Prüfen (Capex-Definition)"
+        status_detail = status_all_detail = status_recent2_detail = (
+            f"Capex weicht laut SEC in {len(capex_dev_years)} Jahren um > "
+            f"{float(cfg.get('sec', {}).get('capex_check', {}).get('tolerance', 0.20)):.0%} ab "
+            f"-> manuell pruefen; nie Kandidat")
+    # v35 (2): SBC fehlt UND ohne SBC waere der Ticker Kandidat -> "Pruefen (SBC fehlt)"
+    elif pruefen_sbc:
+        status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
+        status_detail = status_all_detail = status_recent2_detail = (
+            "SBC fehlt in allen Jahren; ohne SBC Quality ≥ "
+            f"{quality_min:.0f} und MoS ≥ {mos_min:.0%} -> manuell pruefen; nie Kandidat")
+    # v36 (3): Zykliker ohne volle Normalisierung -> nie Kandidat, max. Beobachtung
+    if zyk_unnorm and status in ("Kandidat", "Beobachtung"):
+        status = status_all = status_recent2 = "Beobachtung (nicht normalisiert)"
+        status_detail = status_all_detail = status_recent2_detail = (
+            f"Zykliker ({m.industry}): nur {norm_years} Jahre Normalisierung "
+            f"(< {rule.normalized_earnings_years}) -> max. Beobachtung; nie Kandidat")
+        dcf.is_buy = False
+
+
     # v33/v35: SBC fehlt -> DCF/FCF ohne SBC (Fallback Roh-FCF) -> Flag;
     # v35 (3): wenn SBC aus SEC-EDGAR uebernommen wurde, Quelle im Flag
     if dcf.sbc_missing:
@@ -328,6 +381,33 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     elif status == "Beobachtung":
         flag_parts.append("beobachten")
         logger.info("%s: Beobachtungsliste (%s)", m.ticker, status_detail)
+    # v36 (5): Bilanz-Konsistenz -- gemeldete Nettoverschuldung vs. Total Debt - Cash
+    # (neuestes Jahr mit allen drei Werten); Abweichung > consistency.net_debt_mcap_share
+    # der Marktkapitalisierung -> Flag "ND != Schulden - Cash"
+    nd_inconsistent = False
+    nd_inconsistent_detail = ""
+    if m.market_cap is not None and not m.market_cap.is_na() and m.market_cap.value > 0:
+        ccfg = cfg.get("consistency", {})
+        nd_share = float(ccfg.get("net_debt_mcap_share", 0.05))
+        for fy in sorted(m.years, reverse=True):
+            ym = m.years[fy]
+            nd = ym.get("net_debt"); td = ym.get("_total_debt"); cash = ym.get("_cash")
+            if (nd is None or nd.is_na() or td is None or td.is_na()
+                    or cash is None or cash.is_na()):
+                continue
+            diff = abs(nd.value - (td.value - cash.value))
+            if diff > nd_share * m.market_cap.value:
+                nd_inconsistent = True
+                nd_inconsistent_detail = (f"FY{fy}: ND ({nd.value/1e9:,.1f} Mrd.) weicht von "
+                                          f"Schulden-Cash ({(td.value-cash.value)/1e9:,.1f} Mrd.) um "
+                                          f"{diff/1e9:,.1f} Mrd. ab (> {nd_share:.0%} Marktkap.)")
+            break  # nur neuestes Jahr mit vollstaendigen Werten
+    if nd_inconsistent:
+        flag_parts.append("ND != Schulden - Cash")
+        logger.warning("%s: gemeldete ND weicht um > %.0f%% der Marktkap. von "
+                       "Schulden-Cash ab -> Flag 'ND != Schulden - Cash'",
+                       m.ticker, float(cfg.get("consistency", {}).get("net_debt_mcap_share", 0.05)) * 100)
+
     flags = " ".join(dict.fromkeys(flag_parts))  # entdoppeln, Reihenfolge behalten
 
     # v35 (5): Datenqualitaet je Ticker (fuer testlauf_fehler.txt):
@@ -335,9 +415,20 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     # SEC-Abweichungen, Sektorregel (Sonderregel/Ausschluss)
     dq: list[str] = []
     core_keys = ("revenue", "ebit", "net_income", "operating_cashflow", "equity", "fcf")
+    # v36 (1): nur Jahre melden, die der Provider ueberhaupt liefert -- ein Jahr
+    # "geliefert" = mindestens eines der drei Statements (GuV/Bilanz/Cashflow)
+    # hat eine Spalte fuer dieses Jahr (fiscal_ends gepflegt UND mind. eine
+    # Statement-Kennzahl vorhanden). Die leere fuenfte Spalte (kein Statement)
+    # wird NICHT als Datenluecke gemeldet.
     for fy in sorted(m.years):
+        ym = m.years[fy]
+        delivered = bool(m.fiscal_ends.get(fy)) and any(
+            k in ym and not ym[k].is_na()
+            for k in ("revenue", "equity", "operating_cashflow"))
+        if not delivered:
+            continue  # Jahr nicht geliefert -> keine Luecke melden
         missing_keys = [k for k in core_keys
-                        if k not in m.years[fy] or m.years[fy][k].is_na()]
+                        if k not in ym or ym[k].is_na()]
         if missing_keys:
             dq.append(f"FY{fy} Datenluecke: {', '.join(missing_keys)}")
     min_cov = float(cfg.get("score_groups", {}).get("min_coverage_value", 0.70))
@@ -349,10 +440,16 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         dq.append(f"Sektor-Sonderregel ({m.industry}): DCF/FCF-Yield n/a")
     if pruefen_sbc:
         dq.append("SBC fehlt in allen Jahren -> Pruefstatus (ohne SBC-Kandidat)")
+    if pruefen_capex:
+        dq.append(f"Capex weicht laut SEC in {len(capex_dev_years)} Jahren ab "
+                  f"(> {float(cfg.get('sec', {}).get('capex_check', {}).get('tolerance', 0.20)):.0%}) "
+                  f"-> Pruefstatus (Capex-Definition)")
     if getattr(m, "ebitda_unplausible", False):
         dq.append("EBITDA < EBIT (unplausibel)")
     if getattr(m, "ttm", None) is not None and not getattr(m, "ttm_plausible", True):
         dq.append("Quartalsdaten unplausibel (Rueckfall GJ)")
+    if nd_inconsistent_detail:
+        dq.append(nd_inconsistent_detail)
     out["data_quality"] = dq
     for d in dq:
         logger.info("%s Datenqualitaet: %s", m.ticker, d)
@@ -450,6 +547,14 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "sec_detail": sec_detail,
         "sbc_sec_sources": sbc_sec_sources,
         "data_quality": dq,
+        # v36: MoS bei erhoehtem Diskontsatz (robust) + Status-Zusatz,
+        #       Capex-Definitionspruefung, Bilanz-Konsistenz, Zykliker-Cap
+        "mos_robust": mos_robust,
+        "mos_robust_rate": float(dc.get("robust_discount_rate", 0.10)),
+        "status_pruefen_capex": pruefen_capex,
+        "capex_dev_years": capex_dev_years,
+        "nd_inconsistent": nd_inconsistent,
+        "zyk_unnorm": zyk_unnorm,
     }
     out["row"] = row
     out["sec_check"] = sec
