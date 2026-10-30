@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import math
 
-from data.loader import TickerMetrics
+from data.loader import Metric, TickerMetrics
 from data.metrics import fcf_yield, fcf_yield_sbc, roic
 from data.sanity import check_ticker
 from scoring.criteria import compute_criteria, active_criteria
@@ -47,6 +47,26 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     for v in out["violations"]:
         logger.warning("%s Sanity-Verstoss: %s", m.ticker, v)
 
+    # v35 (3): SBC-Fallback aus SEC-EDGAR -- wenn Yahoo/FMP fuer ein Jahr keine
+    # SBC liefert, wird ShareBasedCompensation aus companyfacts uebernommen
+    # (einmalig laden, alle betroffenen Jahre ergaenzen). Quelle im Flag.
+    sbc_sec_sources: list[str] = []
+    if cfg.get("sec", {}).get("enabled", True):
+        try:
+            from data.sec import sec_sbc_fallback_all
+            for fy, sbc_val, quelle in sec_sbc_fallback_all(m, cfg):
+                fcf_m = m.years[fy].get("fcf")
+                if fcf_m is not None and not fcf_m.is_na():
+                    m.years[fy]["stock_based_compensation"] = Metric(
+                        "stock_based_compensation", sbc_val, fcf_m.unit, fcf_m.currency, fy)
+                    m.years[fy]["fcf_sbc"] = Metric(
+                        "fcf_sbc", fcf_m.value - sbc_val, fcf_m.unit, fcf_m.currency, fy)
+                    sbc_sec_sources.append(quelle)
+                    logger.info("%s: SBC FY%d via %s = %.3g", m.ticker, fy, quelle, sbc_val)
+        except Exception as exc:
+            logger.warning("%s: SEC-SBC-Fallback fehlgeschlagen: %s", m.ticker, exc)
+    out["sbc_sec_sources"] = sbc_sec_sources
+
     criteria = compute_criteria(m, cfg)
     result = score_ticker(criteria, cfg["criteria"], cfg.get("score_groups"))
     out["criteria"] = criteria
@@ -62,8 +82,20 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     row_price_to_book = price_to_book(m)
     row_dividend_yield = dividend_yield(m)
 
-    # DCF (Build-Schritt 6): MoS Base in die Row; Kaufkandidat markieren
-    dcf = compute_dcf(m, cfg)
+    # v35 (1): Sektor-Sonderregel (Banken/Versicherer/REITs/Versorger) --
+    # DCF und FCF-Yield werden NICHT berechnet (leeres DcfResult mit NaN)
+    special = rule.group == "special"
+    if special:
+        from valuation.dcf import DcfResult
+        dcf = DcfResult(fcf_normalized=float("nan"), fcf_years_used=0,
+                        revenue_cagr=float("nan"),
+                        discount_rate=float(cfg["dcf"].get("discount_rate", 0.09)),
+                        terminal_growth=float(cfg["dcf"].get("terminal_growth", 0.025)),
+                        shares=float("nan"), fcf_mode="n/a (Sonderregel)")
+        logger.info("%s: Sektor-Sonderregel (%s) -- DCF/FCF-Yield nicht berechnet",
+                    m.ticker, m.industry)
+    else:
+        dcf = compute_dcf(m, cfg)
     out["dcf"] = dcf
     price = float("nan")
     if (m.market_cap is not None and not m.market_cap.is_na()
@@ -71,10 +103,14 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         price = m.market_cap.value / dcf.shares
 
     # v27: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø / TTM rein)
+    # v35: bei Sektor-Sonderregel kein DCF -> alle MoS NaN ("n/a (Sonderregel)")
     mos_by_mode = {}
     for mode in ("avg3", "latest", "ttm", "ttm_only"):
-        dcf_m = compute_dcf(m, cfg, fcf_mode=mode)
-        mos_by_mode[mode] = dcf_m.margin_of_safety
+        if special:
+            mos_by_mode[mode] = float("nan")
+        else:
+            dcf_m = compute_dcf(m, cfg, fcf_mode=mode)
+            mos_by_mode[mode] = dcf_m.margin_of_safety
     mos_avg3 = mos_by_mode.get("avg3", float("nan"))
     mos_latest = mos_by_mode.get("latest", float("nan"))
     mos_ttm = mos_by_mode.get("ttm", float("nan"))
@@ -159,8 +195,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                                         f"aber min {mos_rule_val:.1%} < {mos_min:.0%}")
         return "nein", ""
 
-    # v34: SBC-Zeile fehlt in ALLEN Jahren -> Status "Pruefen (SBC fehlt)" (nie Kandidat);
-    # FCF/DCF laufen ohne SBC (Fallback v33), Roh-FCF-Yield fliesst NICHT in den Value-Score
+    # v34/v35: SBC-Zeile fehlt in ALLEN Jahren -> Status "Pruefen (SBC fehlt)" (nie Kandidat);
+    # FCF/DCF laufen ohne SBC (Fallback v33), Roh-FCF-Yield fliesst NICHT in den Value-Score.
+    # v35 (2): "Pruefen (SBC fehlt)" NUR, wenn der Ticker OHNE SBC-Abzug
+    #          Quality >= buy_quality_min UND MoS >= buy_margin_of_safety_min erreicht;
+    #          sonst normaler Status (nein/Beobachtung).
     sbc_missing_all = not any(
         "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()
         for fy in m.years
@@ -168,8 +207,15 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         getattr(m, "ttm", None) is not None
         and m.ttm.ttm.get("fcf_sbc") is not None and not m.ttm.ttm["fcf_sbc"].is_na()
     )
-    if sbc_missing_all:
+    pruefen_sbc = False
+    if sbc_missing_all and not special:
         dcf.is_buy = False  # nie Kandidat ohne SBC
+        q_ok = (result["quality"] == result["quality"]
+                and result["quality"] >= quality_min)
+        m_ok = (mos_rule == mos_rule and mos_rule >= mos_min)
+        pruefen_sbc = bool(q_ok and m_ok)
+    elif sbc_missing_all and special:
+        pruefen_sbc = False  # Sonderregel hat eigenen Status
 
     mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
     mos_vals_global = mos_vals
@@ -188,10 +234,6 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
         status_all, status_all_detail = _status_for(mos_rule, mos_vals, dcf.is_buy)
         status_recent2, status_recent2_detail = status, status_detail
-        if sbc_missing_all:
-            status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
-            status_detail = status_all_detail = status_recent2_detail = (
-                "SBC fehlt in allen Jahren -> FCF/DCF ohne SBC; nie Kandidat")
     else:
         # Default min_all: aktive Regel = alle Modi
         status_all, status_all_detail = status, status_detail
@@ -199,11 +241,17 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                           is_buy_candidate(result["quality"], dcf, price, cfg, mos_rule=mos_recent2))
         status_recent2, status_recent2_detail = _status_for(mos_recent2, recent2, is_buy_recent2)
 
-    # v34: SBC fehlt -> alle Status "Pruefen (SBC fehlt)" (ueberschreibt Kandidat/Beobachtung)
-    if sbc_missing_all:
+    # v35 (1): Sektor-Sonderregel -> Status "Sonderregel noetig" (statt nein/Pruefen)
+    if special:
+        status = status_all = status_recent2 = "Sonderregel nötig"
+        status_detail = status_all_detail = status_recent2_detail = (
+            f"{m.industry}: DCF/FCF-Yield nicht berechnet (Sonderregel)")
+    # v35 (2): SBC fehlt UND ohne SBC waere der Ticker Kandidat -> "Pruefen (SBC fehlt)"
+    elif pruefen_sbc:
         status = status_all = status_recent2 = "Prüfen (SBC fehlt)"
         status_detail = status_all_detail = status_recent2_detail = (
-            "SBC fehlt in allen Jahren -> FCF/DCF ohne SBC; nie Kandidat")
+            "SBC fehlt in allen Jahren; ohne SBC Quality ≥ "
+            f"{quality_min:.0f} und MoS ≥ {mos_min:.0%} -> manuell pruefen; nie Kandidat")
 
     # Quelle pro Ticker loggen (CLAUDE.md: Logging-Pflicht)
     logger.info("%s: Quelle=%s (%s)", m.ticker, m.source or "unbekannt", m.name)
@@ -234,20 +282,31 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         flag_parts.append("ttm:unplausibel")
         logger.warning("%s: Quartalsdaten unplausibel -> Rueckfall auf Geschaeftsjahre (DCF-Basis)",
                        m.ticker)
-    # v26: SEC-EDGAR-Abgleich (US-Ticker) — Abweichung > tolerance -> Flag
+    # v26/v35: SEC-EDGAR-Abgleich (US-Ticker) — Abweichung > tolerance -> Flag
+    # v35 (4): Details (Feld/Jahr/%) werden in der Row als sec_detail mitgefuehrt
     sec = None
+    sec_detail = ""
     if cfg.get("sec", {}).get("enabled", True):
         try:
-            from data.sec import sec_check
+            from data.sec import sec_check, format_sec_detail
             sec = sec_check(m, cfg)
             if sec.flag:
+                tol = float(cfg.get("sec", {}).get("tolerance", 0.05))
+                devs = [d for d in sec.deviations if d.get("dev", 0) == d.get("dev", 0)
+                        and d["dev"] > tol]
+                sec_detail = format_sec_detail(devs)
                 flag_parts.append("sec:abweichend")
-                logger.warning("%s: %s", m.ticker, sec.note)
+                logger.warning("%s: %s | Detail: %s", m.ticker, sec.note, sec_detail)
         except Exception as exc:  # SEC nicht erreichbar -> kein Absturz
             logger.warning("%s: SEC-Abgleich fehlgeschlagen: %s", m.ticker, exc)
-    # v33: SBC fehlt -> DCF/FCF ohne SBC (Fallback Roh-FCF) -> Flag
+    # v33/v35: SBC fehlt -> DCF/FCF ohne SBC (Fallback Roh-FCF) -> Flag;
+    # v35 (3): wenn SBC aus SEC-EDGAR uebernommen wurde, Quelle im Flag
     if dcf.sbc_missing:
-        flag_parts.append("SBC n/a (ohne SBC)")
+        if sbc_sec_sources:
+            flag_parts.append("SBC n/a (ohne SBC; SEC-Fallback: "
+                              + "; ".join(sbc_sec_sources) + ")")
+        else:
+            flag_parts.append("SBC n/a (ohne SBC)")
         logger.warning("%s: kein FCF-SBC verfuegbar -> FCF und DCF OHNE SBC (Roh-FCF) verwendet",
                        m.ticker)
     # v29: EBITDA unplausibel (EBITDA < EBIT) -> Flag + ND/EBITDA n/a
@@ -270,6 +329,34 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         flag_parts.append("beobachten")
         logger.info("%s: Beobachtungsliste (%s)", m.ticker, status_detail)
     flags = " ".join(dict.fromkeys(flag_parts))  # entdoppeln, Reihenfolge behalten
+
+    # v35 (5): Datenqualitaet je Ticker (fuer testlauf_fehler.txt):
+    # Datenluecken (fehlende Kernkennzahlen je Jahr), Abdeckung < 70 %,
+    # SEC-Abweichungen, Sektorregel (Sonderregel/Ausschluss)
+    dq: list[str] = []
+    core_keys = ("revenue", "ebit", "net_income", "operating_cashflow", "equity", "fcf")
+    for fy in sorted(m.years):
+        missing_keys = [k for k in core_keys
+                        if k not in m.years[fy] or m.years[fy][k].is_na()]
+        if missing_keys:
+            dq.append(f"FY{fy} Datenluecke: {', '.join(missing_keys)}")
+    min_cov = float(cfg.get("score_groups", {}).get("min_coverage_value", 0.70))
+    if result["coverage"] == result["coverage"] and result["coverage"] < min_cov:
+        dq.append(f"Datenabdeckung {result['coverage']:.0%} < {min_cov:.0%}")
+    if sec is not None and sec.flag and sec_detail:
+        dq.append(f"SEC-Abweichung: {sec_detail}")
+    if special:
+        dq.append(f"Sektor-Sonderregel ({m.industry}): DCF/FCF-Yield n/a")
+    if pruefen_sbc:
+        dq.append("SBC fehlt in allen Jahren -> Pruefstatus (ohne SBC-Kandidat)")
+    if getattr(m, "ebitda_unplausible", False):
+        dq.append("EBITDA < EBIT (unplausibel)")
+    if getattr(m, "ttm", None) is not None and not getattr(m, "ttm_plausible", True):
+        dq.append("Quartalsdaten unplausibel (Rueckfall GJ)")
+    out["data_quality"] = dq
+    for d in dq:
+        logger.info("%s Datenqualitaet: %s", m.ticker, d)
+
     row = {
         "ticker": m.ticker,
         "name": m.name,
@@ -355,9 +442,14 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "history_years": count_value_years(m),
         # v33: SBC-Fallback (DCF ohne SBC) + Start-FCF <= 0 + Value-n/a-Schwelle
         "dcf_sbc_missing": bool(dcf.sbc_missing),
-        "status_pruefen_sbc": sbc_missing_all,
+        "status_pruefen_sbc": pruefen_sbc,
         "dcf_fcf_le0": bool(dcf.fcf_le0),
         "value_na_below_coverage": float(cfg.get("score_groups", {}).get("min_coverage_value", 0.70)),
+        # v35: Sektor-Sonderregel + SEC-Detail + SBC-SEC-Quelle + Datenqualitaet
+        "sector_special": special,
+        "sec_detail": sec_detail,
+        "sbc_sec_sources": sbc_sec_sources,
+        "data_quality": dq,
     }
     out["row"] = row
     out["sec_check"] = sec

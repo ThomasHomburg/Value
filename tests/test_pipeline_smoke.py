@@ -44,6 +44,10 @@ APP_ROW_COLUMNS = {
     # v30: Status unter beiden Kandidatenregeln + aktive Regel
     "status_all", "status_all_detail", "status_recent2", "status_recent2_detail",
     "mos_recent2", "candidate_mode",
+    # v33: SBC-Pruefstatus + Start-FCF <= 0
+    "dcf_sbc_missing", "status_pruefen_sbc", "dcf_fcf_le0", "value_na_below_coverage",
+    # v35: Sektor-Sonderregel + SEC-Detail + SBC-SEC-Quelle
+    "sector_special", "sec_detail", "sbc_sec_sources", "data_quality",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen

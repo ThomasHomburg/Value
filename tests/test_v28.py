@@ -72,12 +72,18 @@ def test_industry_nicht_sector_pypl_visa_mastercard_keine_banken(cfg):
         assert sector_rule(m, cfg).group == "standard"
 
 def test_banken_und_versicherer_ueber_industry(cfg):
-    """Banken & Versicherer erkannt ueber Industry (nicht Sector)."""
-    for ind in ("Banks - Diversified", "Banks - Regional",
-                "Insurance - Property & Casualty", "Insurance - Life",
-                "Capital Markets", "Asset Management"):
+    """v28: Industry statt Sector. v35: Banks*/Insurance*/Capital Markets sind
+    jetzt Sektor-Sonderregel ('special'); Asset Management & Co. bleiben
+    'financials' (ROE/P-B/Div-Yield)."""
+    for ind in ("Asset Management", "Diversified Financial Services", "Mortgage Finance"):
         m = _mk(industry=ind, sector="Financial Services")
         assert sector_rule(m, cfg).group == "financials", ind
+    # v35: Banken/Versicherer/Capital Markets -> Sonderregel
+    for ind in ("Banks - Diversified", "Banks - Regional",
+                "Insurance - Property & Casualty", "Insurance - Life",
+                "Capital Markets"):
+        m = _mk(industry=ind, sector="Financial Services")
+        assert sector_rule(m, cfg).group == "special", ind
 
 def test_zykliker_ueber_industry(cfg):
     """Rohstoffe, Chemie, Stahl, Auto -> Zykliker (7-J.-Normalisierung)."""
@@ -89,17 +95,19 @@ def test_zykliker_ueber_industry(cfg):
         assert rule.normalized_earnings_years == 7
 
 def test_reits_ueber_industry_prefix(cfg):
-    """REITs erkannt am Industry-Praefix 'REIT - ...' (Sector Real Estate)."""
+    """v28: REITs am Industry-Praefix erkannt. v35: REIT - * ist jetzt
+    Sektor-Sonderregel ('special') -- DCF/FCF-Yield nicht berechnet."""
     for ind in ("REIT - Industrial", "REIT - Retail", "REIT - Residential",
                 "REIT - Specialty", "REIT - Office"):
         m = _mk(industry=ind, sector="Real Estate")
         rule = sector_rule(m, cfg)
-        assert rule.group == "reits", ind
-        assert "FFO" in rule.note
+        assert rule.group == "special", ind
+        assert "Sonderregel" in rule.note
 
 def test_financials_kriterien_aktiv_roic_fcf_nd_na(cfg):
-    """Banken/Versicherer: ROIC, FCF, ND/EBITDA n/a; ROE, P/B, Div-Yield aktiv."""
-    m = _mk(industry="Banks - Diversified", sector="Financial Services",
+    """Financials (v28, z. B. Asset Management -- v35-special-Gruppen ausgenommen):
+    ROIC, FCF, ND/EBITDA n/a; ROE, P/B, Div-Yield aktiv."""
+    m = _mk(industry="Asset Management", sector="Financial Services",
             extras={"price_to_book": Metric("price_to_book", 1.2, "ratio", "", 0),
                     "dividend_yield": Metric("dividend_yield", 0.03, "ratio", "", 0)})
     crits = compute_criteria(m, cfg)
@@ -143,30 +151,29 @@ def test_zykliker_flag_weniger_als_7_jahre(cfg):
     assert out["row"]["normalized_earnings_years"] == 5
 
 def test_reit_ffo_yield_statt_fcf_yield(cfg):
-    """REIT: fcf_yield_sbc_avg3 nutzt FFO-Yield; FFO-Hinweis in sector_note."""
+    """v35: REIT - * ist Sektor-Sonderregel -> FCF-Yield/MoS n/a, Status
+    'Sonderregel noetig' (FFO-Bewertung erfolgt manuell)."""
     cfg_off = dict(cfg)
     cfg_off["sec"] = {"enabled": False}
     m = _mk(industry="REIT - Industrial", sector="Real Estate",
             extras={"ffo_per_share": Metric("ffo_per_share", 5.0, "USD", "", 0)})
     out = evaluate_ticker(m, cfg_off)
     row = out["row"]
-    assert row["sector_group"] == "reits"
-    assert "FFO" in row["sector_note"]
+    assert row["sector_group"] == "special"
+    assert row["status"] == "Sonderregel nötig"
     crits = out["criteria"]
-    assert "ffo_yield" in crits
-    # FFO-Yield = FFO je Aktie / Kurs; Kurs = mcap / shares = 500
-    assert crits["ffo_yield"].value == pytest.approx(5.0 / 500.0)
-    # FCF-Yield-Kriterium liefert FFO-Yield (nicht FCF-Yield)
-    assert crits["fcf_yield_sbc_avg3"].value == pytest.approx(5.0 / 500.0)
+    assert crits["fcf_yield_sbc_avg3"].is_na
+    assert crits["mos_base"].is_na
 
 def test_reit_ohne_ffo_fcf_yield_na_und_hinweis(cfg):
-    """REIT ohne gemeldetes FFO: ffo_yield n/a; Hinweistext mit Fallback."""
+    """v35: REIT - * -> Sonderregel; FCF-Yield und MoS n/a (nie Roh-FCF)."""
     m = _mk(industry="REIT - Retail", sector="Real Estate")
     rule = sector_rule(m, cfg)
-    assert "Fallback" in rule.note or "FFO" in rule.note
+    assert rule.group == "special"
+    assert "Sonderregel" in rule.note
     crits = compute_criteria(m, cfg)
-    assert crits["ffo_yield"].is_na
-    assert crits["fcf_yield_sbc_avg3"].is_na  # FFO fehlt -> n/a (nie Roh-FCF)
+    assert crits["fcf_yield_sbc_avg3"].is_na  # Sonderregel -> n/a (nie Roh-FCF)
+    assert crits["mos_base"].is_na
 
 
 # --- (1) Bear/Bull je Modus -----------------------------------------------------

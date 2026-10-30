@@ -251,6 +251,19 @@ sector_rules:
     reits:
       # REITs: FFO-Hinweis statt FCF-Yield (FFO je Aktie ist massgeblich).
       industries: []   # Erkennung ueber Industry-Praefix 'REIT - ...'
+    special:
+      # v35: Industry-Gruppen mit SONDERREGEL -- DCF und FCF-Yield werden
+      # NICHT berechnet (MoS-Zellen "n/a (Sonderregel)", Status
+      # "Sonderregel noetig"). Pattern per fnmatch auf das Industry-Feld:
+      #   Banken (Banks - *, Capital Markets), Versicherer (Insurance - *),
+      #   REITs (REIT - *), Versorger (Utilities - *).
+      # PYPL/V/MA (Credit Services) sind NICHT dabei -> Normalmodell.
+      industry_patterns:
+        - "Banks - *"
+        - "Capital Markets"
+        - "Insurance - *"
+        - "REIT - *"
+        - "Utilities - *"
 
 score_groups:
   # Quality-Score und Value-Score werden getrennt berechnet (gewichtete Summe
@@ -264,6 +277,9 @@ score_groups:
   # v33: Value-Score wird als "n/a" angezeigt, wenn die Datenabdeckung darunter
   # liegt (zu wenige bewertete Kriterien -> Value-Aussage nicht belastbar)
   min_coverage_value: 0.70
+  # v35: Quality-Score wird als "n/a" angezeigt, wenn die Datenabdeckung
+  # darunter liegt (z. B. Sektor-Sonderregel: nicht anwendbare Kriterien n/a)
+  min_coverage_quality: 0.70
 
 sanity:
   # Plausibilitaetsgrenzen [min, max] fuer den Sanity-Check (Log-Markierung).

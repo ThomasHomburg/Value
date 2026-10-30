@@ -115,12 +115,12 @@ def _run_batched(tickers: list[str], cfg: dict, providers: dict, args) -> tuple[
 
 def _write_ranking_csv(rows: list[dict], excluded: list[dict], errors: list[dict], out_path: str) -> None:
     """v32: Ergebnis als CSV speichern (bewertete Rows + ausgeschlossene + Fehler)."""
-    cols = ["ticker", "name", "sector", "industry", "country", "source", "score", "quality",
+    cols = ["ticker", "name", "sector", "industry", "sector_group", "country", "source", "score", "quality",
             "value", "coverage", "status", "status_all", "status_recent2", "candidate_mode",
             "margin_of_safety", "mos_rule", "mos_recent2", "mos_avg3", "mos_latest", "mos_ttm",
             "mos_ttm_only", "mos_bear", "mos_bull", "mos_base_alt_nd", "nd_ebitda",
             "roic_5y", "roic_latest", "fcf_yield_3y", "history_years", "flags",
-            "sec_check_ok", "sec_check_flag", "sec_check_note", "kandidat"]
+            "sec_check_ok", "sec_check_flag", "sec_check_note", "sec_detail", "kandidat"]
     with open(out_path, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
         w.writerow(cols)

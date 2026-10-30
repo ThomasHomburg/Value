@@ -23,6 +23,14 @@ python3 -m streamlit run app.py
 - **Import** — eigene Liste über Seite 3 (gleiches Provider-Routing)
 - **DEMO** — nur Fallback, wenn kein Live-Ticker geladen werden kann (AAPL aus echten öffentlichen Daten + synthetische Firmen)
 
+## v35: Sektor-Sonderregel, SEC-SBC-Fallback, SEC-Detail, Datenqualitaet
+- **Sektor-Sonderregel** (`sector_rules.groups.special.industry_patterns`: `Banks - *`, `Capital Markets`, `Insurance - *`, `REIT - *`, `Utilities - *`): **DCF und FCF-Yield werden nicht berechnet** — MoS-Zellen zeigen **„n/a (Sonderregel)“**, Status **„Sonderregel nötig“** (statt „nein“/„Prüfen“). PYPL/V/MA (Credit Services) bleiben **Normalmodell** (Test in `test_v35.py`). Quality nur aus anwendbaren Kriterien; **„n/a“ bei Abdeckung < 70 %** (`score_groups.min_coverage_quality`).
+- **„Prüfen (SBC fehlt)“ nur noch, wenn ohne SBC Quality ≥ 60 UND MoS ≥ 30 %** — sonst normaler Status (nie Kandidat bleibt bestehen).
+- **SBC-Fallback aus SEC-EDGAR** (`sec_sbc_fallback_all`, `ShareBasedCompensation`, US-Ticker): ergänzt `fcf_sbc` für Jahre ohne Yahoo-SBC, Quelle im Flag (`SBC n/a (ohne SBC; SEC-Fallback: …)` falls Rest fehlt).
+- **SEC-Detail**: Rangliste + CSV zeigen Feld (OCF/Capex/SBC), Jahr und Prozent (z. B. `Capex FY2024 +61,7%`), Row-Feld `sec_detail` (`format_sec_detail`); Tests mit CAT und DE (monkeypatchtes `_fetch_companyfacts`).
+- **Datenqualität in `testlauf_fehler.txt`**: Datenlücken je Jahr, Abdeckung < 70 %, SEC-Abweichungen, Sektorregel-Ausschlüsse je Ticker (Row `data_quality`).
+- **Testlauf wiederholt** (25 Ticker Seed 42): `testlauf_25.csv` mit neuen Spalten **Industry-Gruppe** und **SEC-Detail**; `testlauf_fehler.txt` inkl. Datenqualität. Ergebnis: 25 bewertet / 0 ausgeschlossen / 0 Fehler; Banken/Versicherer/REITs/Versorger = „Sonderregel nötig“, MoS „n/a (Sonderregel)“.
+
 ## v34: SBC-Regel mit Prüfstatus, Kandidaten-Labels, MoS „< −100 %“
 - **SBC fehlt in allen Jahren** → FCF-Yield und DCF **ohne SBC-Abzug** (Roh-FCF-Fallback), Flag **`SBC n/a (ohne SBC)`** **und Status „Prüfen (SBC fehlt)“** — der nie „Kandidat“ wird (`is_buy=False`). Der Roh-FCF-Yield fließt **nicht** in den Value-Score (`fcf_yield_sbc_avg3` bleibt n/a). Live: CAT, XOM, JPM, TRV, CSX, WFC, AIG, MET, DUK, DOW.
 - **Kandidaten-Labels**: „**Kandidat (streng)**“ = alle Modi, „**Kandidat (aktuell)**“ = nur jüngste 2 (Spalten „Status (alle Modi)“ / „Status (jüngste 2)“; aktive Regel je `dcf.candidate_mode`).

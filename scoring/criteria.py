@@ -44,6 +44,13 @@ def _rule(m: TickerMetrics, cfg) -> object:
     return cached
 
 
+def _special(m: TickerMetrics, cfg) -> bool:
+    """v35: Sonderregel-Gruppe (Banken/Versicherer/REITs/Versorger als
+    Industry-Pattern) -- DCF und FCF-Yield werden nicht berechnet; die
+    betroffenen Kriterien sind n/a."""
+    return _rule(m, cfg).group == "special"
+
+
 def _values(metrics: TickerMetrics, name: str) -> list[tuple[int, float]]:
     """[(Jahr, Wert)] chronologisch, ohne NaN."""
     out = []
@@ -100,6 +107,9 @@ def calc_roic_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     # v28: Banken/Versicherer nutzen ROE statt ROIC
     if _rule(m, cfg).group == "financials":
         return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel (Banken/Versicherer/REITs/Versorger) -> ROIC n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "ebit")
     vals = [roic(m, fy) for fy, _ in _values(m, "ebit")]
     vals = [v for v in vals if v == v]
@@ -122,6 +132,9 @@ def calc_net_debt_ebitda(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     # v28: Banken/Versicherer nutzen P/B statt ND/EBITDA
     if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> ND/EBITDA n/a (DCF/FCF nicht berechnet)
+    if _special(m, cfg):
         return _result(float("nan"), True, 0, thin)
     # v29: EBITDA unplausibel (EBITDA < EBIT) -> ND/EBITDA als n/a
     if getattr(m, "ebitda_unplausible", False):
@@ -155,6 +168,9 @@ def calc_fcf_positive_years(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     if _rule(m, cfg).group == "financials":
         return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> FCF-Kriterien n/a (FCF-Yield nicht berechnet)
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "fcf")
     vals = [v for _, v in _values(m, "fcf")]
     if len(vals) < cfg["fcf_pos_min_years"]:
@@ -169,6 +185,9 @@ def calc_fcf_margin_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     # v28: Banken/Versicherer nutzen Dividendenrendite statt FCF-Marge
     if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> FCF-Marge n/a
+    if _special(m, cfg):
         return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "fcf", "revenue")
     fcf = dict(_values(m, "fcf"))
@@ -221,6 +240,9 @@ def calc_fcf_yield_sbc_avg3(m: TickerMetrics, cfg, fx) -> CriterionResult:
     years = _year_count(m, "fcf_sbc")
     if m.market_cap is None or m.market_cap.is_na():
         return _result(float("nan"), True, years, thin)
+    # v35: Sonderregel -> FCF-Yield wird nicht berechnet -> n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, years, thin)
     # v28: REITs nutzen FFO-Yield statt FCF-Yield (FFO ist massgeblich)
     if _rule(m, cfg).group == "reits":
         return calc_ffo_yield(m, cfg, fx)
@@ -243,6 +265,9 @@ def calc_mos_base(m: TickerMetrics, cfg, fx) -> CriterionResult:
     """
     from valuation.dcf import compute_dcf
     thin = cfg["thin_years"]
+    # v35: Sonderregel -> DCF wird nicht berechnet -> MoS n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, len(m.years), thin)
     dcf = compute_dcf(m, {"dcf": _dcf_cfg_for_criteria()}, fx=fx)
     mos = dcf.margin_of_safety
     years = len(m.years)
@@ -401,6 +426,10 @@ def active_criteria(m: TickerMetrics, cfg: dict) -> dict[str, Calc]:
     from scoring.sectors import sector_rule
     group = sector_rule(m, cfg).group
     crits = dict(CRITERIA)
+    # v35: Sonderregel-Gruppe -> nur Standard-Kriterien; die nicht anwendbaren
+    # (ROIC, ND/EBITDA, FCF-*, FCF-Yield, MoS) liefern n/a (siehe Calc-Funktionen)
+    if group == "special":
+        return crits
     if group == "financials":
         for name in ("roe_avg5_financials", "price_to_book", "dividend_yield"):
             crits[name] = SECTOR_CRITERIA[name]

@@ -122,6 +122,13 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
             min_cov = float(groups_cfg.get("min_coverage_value", 0.70))
         if (result["coverage"] == result["coverage"] and result["coverage"] < min_cov):
             result["value"] = float("nan")
+        # v35: Quality als n/a, wenn Datenabdeckung < min_coverage_quality
+        # (z. B. Sektor-Sonderregel: nicht anwendbare Kriterien sind n/a)
+        min_cov_q = 0.70
+        if groups_cfg:
+            min_cov_q = float(groups_cfg.get("min_coverage_quality", 0.70))
+        if (result["coverage"] == result["coverage"] and result["coverage"] < min_cov_q):
+            result["quality"] = float("nan")
 
         # Gesamtscore aus Gruppen, renormalisiert falls eine Gruppe n/a
         g_entries = []

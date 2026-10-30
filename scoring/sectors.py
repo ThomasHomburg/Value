@@ -17,12 +17,19 @@ Gruppen:
   normalisieren (gleitender Durchschnitt), soweit Daten reichen; sonst Flag.
 - reits: FFO-Hinweis statt FCF-Yield (FFO ist die massgebliche Kennzahl;
   yfinance liefert FFO i. d. R. nicht -> Hinweis/Fallback auf FCF-Yield).
+- special (v35): Industry-Gruppen mit Sonderregel -- DCF und FCF-Yield
+  werden NICHT berechnet (MoS-Zellen "n/a (Sonderregel)", Status
+  "Sonderregel noetig"). Pattern (fnmatch, case-insensitive) auf Industry:
+  Banken (Banks - *, Capital Markets), Versicherer (Insurance - *),
+  REITs (REIT - *), Versorger (Utilities - *). PYPL/V/MA (Credit Services)
+  sind NICHT enthalten -> Normalmodell.
 
 Config: config.yaml Block `sector_rules`.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import math
 from dataclasses import dataclass
 
@@ -80,7 +87,7 @@ _REIT_PREFIX = "reit"
 
 @dataclass
 class SectorRule:
-    group: str          # "financials" | "cyclicals" | "reits" | "standard"
+    group: str          # "financials" | "cyclicals" | "reits" | "special" | "standard"
     normalized_earnings_years: int = 1   # 7 bei Zyklikern, sonst 1
     note: str = ""      # Anzeige-Hinweis (z. B. FFO statt FCF-Yield)
 
@@ -96,14 +103,29 @@ def sector_rule(m: TickerMetrics, cfg: dict | None = None) -> SectorRule:
     fin_cfg = groups_cfg.get("financials", {})
     cyc_cfg = groups_cfg.get("cyclicals", {})
     reit_cfg = groups_cfg.get("reits", {})
+    spec_cfg = groups_cfg.get("special", {})
     fin_industries = {_norm(x) for x in fin_cfg.get(
         "industries", sorted(_FINANCIAL_INDUSTRIES))}
     cyc_industries = {_norm(x) for x in cyc_cfg.get(
         "industries", sorted(_CYCLICAL_INDUSTRIES))}
     reit_industries = {_norm(x) for x in reit_cfg.get("industries", [])}
+    # v35: Sonderregel-Gruppen (Banken/Versicherer/REITs/Versorger als Liste von
+    # Industry-Patternen, z. B. "Banks - *"). fnmatch, case-insensitive.
+    spec_patterns = [str(x) for x in spec_cfg.get("industry_patterns", [
+        "Banks - *", "Capital Markets", "Insurance - *", "REIT - *", "Utilities - *"])]
 
     industry = _norm(m.industry)
     sector = _norm(m.sector)
+
+    # v35: Sonderregel hat Vorrang (vor reits/financials, damit REIT/Bank/
+    # Versicherer/Versorger NICHT im Normalmodell landen)
+    for pat in spec_patterns:
+        if fnmatch.fnmatchcase(industry, _norm(pat)):
+            return SectorRule(
+                group="special", normalized_earnings_years=1,
+                note=(f"Sonderregel ({m.industry}): DCF und FCF-Yield werden "
+                      f"nicht berechnet -> MoS 'n/a (Sonderregel)', Status "
+                      f"'Sonderregel noetig'"))
 
     is_reit = (industry.startswith(_REIT_PREFIX)
                or industry in reit_industries

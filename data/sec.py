@@ -201,3 +201,106 @@ def sec_check(m: TickerMetrics, cfg: dict) -> SecCheckResult:
         res.note = f"Abgleich ok (max. Abweichung {worst:.1%})"
     logger.info("%s: SEC-Abgleich %s", m.ticker, res.note)
     return res
+
+
+def sec_sbc_fallback(m: TickerMetrics, cfg: dict) -> tuple[float | None, int | None, str]:
+    """v35: SBC-Fallback aus SEC-EDGAR (US-Ticker).
+
+    Wenn der Provider (Yahoo/FMP) fuer ein Geschaeftsjahr keine
+    Aktienverguetung (SBC) liefert, wird der XBRL-Tag ShareBasedCompensation
+    aus data.sec.gov/api/xbrl/companyfacts als Ersatz verwendet.
+
+    Rueckgabe: (sbc_wert, fiscal_year, quelle) -- sbc_wert None, wenn kein
+    SEC-Wert verfuegbar. quelle enthaelt die Herkunft ("SEC EDGAR
+    ShareBasedCompensation FY2025").
+    """
+    sec_cfg = cfg.get("sec", {})
+    if not sec_cfg.get("enabled", True):
+        return None, None, ""
+    country = (m.country or "").upper()
+    if country not in ("US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"):
+        return None, None, ""
+    user_agent = str(sec_cfg.get("user_agent") or _user_agent_default())
+    _UA_CACHE["ua"] = user_agent
+    _MAX_RPS["v"] = float(sec_cfg.get("max_requests_per_second", 5.0))
+    cik = _cik_for_ticker(m.ticker)
+    if not cik:
+        return None, None, ""
+    facts = _fetch_companyfacts(cik, user_agent)
+    if not facts:
+        return None, None, ""
+    sec_vals = _sec_annual_values(facts, "stock_based_compensation")
+    if not sec_vals:
+        return None, None, ""
+    # juengstes Jahr, fuer das Yahoo keine SBC geliefert hat
+    for fy in sorted(m.years, reverse=True):
+        ours = m.years[fy].get("stock_based_compensation")
+        if ours is None or ours.is_na():
+            if fy in sec_vals and sec_vals[fy] != 0:
+                return float(sec_vals[fy]), fy, f"SEC EDGAR ShareBasedCompensation FY{fy}"
+    # Fallback: juengstes verfuegbares SEC-Jahr
+    fy = max(sec_vals)
+    return float(sec_vals[fy]), fy, f"SEC EDGAR ShareBasedCompensation FY{fy}"
+
+
+def sec_sbc_fallback_all(m: TickerMetrics, cfg: dict) -> list[tuple[int, float, str]]:
+    """v35: SBC-Fallback aus SEC-EDGAR fuer ALLE Jahre ohne Yahoo-SBC.
+
+    companyfacts wird nur EINMAL geladen; fuer jedes Geschaeftsjahr, in dem
+    der Provider keine SBC (stock_based_compensation / fcf_sbc) liefert,
+    wird der SEC-Wert (ShareBasedCompensation) uebernommen.
+
+    Rueckgabe: [(fiscal_year, sbc_wert, quelle), ...] -- quelle z. B.
+    "SEC EDGAR ShareBasedCompensation FY2025". Leer, wenn kein US-Ticker,
+    SEC deaktiviert oder keine SEC-Werte vorhanden.
+    """
+    sec_cfg = cfg.get("sec", {})
+    if not sec_cfg.get("enabled", True):
+        return []
+    country = (m.country or "").upper()
+    if country not in ("US", "USA", "UNITED STATES", "UNITED STATES OF AMERICA"):
+        return []
+    user_agent = str(sec_cfg.get("user_agent") or _user_agent_default())
+    _UA_CACHE["ua"] = user_agent
+    _MAX_RPS["v"] = float(sec_cfg.get("max_requests_per_second", 5.0))
+    cik = _cik_for_ticker(m.ticker)
+    if not cik:
+        return []
+    facts = _fetch_companyfacts(cik, user_agent)
+    if not facts:
+        return []
+    sec_vals = _sec_annual_values(facts, "stock_based_compensation")
+    if not sec_vals:
+        return []
+    out = []
+    for fy in sorted(m.years):
+        ours = m.years[fy].get("stock_based_compensation")
+        fsbc = m.years[fy].get("fcf_sbc")
+        if (ours is None or ours.is_na()) and (fsbc is None or fsbc.is_na()):
+            if fy in sec_vals and sec_vals[fy] != 0:
+                out.append((fy, float(sec_vals[fy]),
+                            f"SEC EDGAR ShareBasedCompensation FY{fy}"))
+    return out
+
+
+def format_sec_detail(deviations: list) -> str:
+    """v35: SEC-Abweichungen kompakt als Text: Feld, Jahr, Prozent.
+
+    deviations: [{fy, key, ours, sec, dev}] aus SecCheckResult. Beispiel:
+    "OCF FY2024 +6.2%; Capex FY2023 -12.0%". Nur Abweichungen ueber dem
+    konfigurierten Toleranzwert (Default 5 %) werden gelistet, aber alle
+    uebergebenen Abweichungen formatiert (Aufrufer filtert ggf.).
+    """
+    key_label = {
+        "operating_cashflow": "OCF",
+        "capex": "Capex",
+        "stock_based_compensation": "SBC",
+    }
+    parts = []
+    for d in sorted(deviations, key=lambda x: (x.get("fy", 0), x.get("key", "")), reverse=True):
+        dev = d.get("dev")
+        if dev is None or dev != dev:
+            continue
+        sign = "+" if d.get("ours", 0) >= d.get("sec", 0) else "-"
+        parts.append(f"{key_label.get(d.get('key'), d.get('key'))} FY{d.get('fy')} {sign}{abs(dev):.1%}")
+    return "; ".join(parts)

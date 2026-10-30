@@ -1,26 +1,26 @@
-Ticker,Industry,Status (alle Modi),Status (jüngste 2),Quality,Value,Datenabdeckung,MoS Ø3J,MoS jüngstes GJ,MoS TTM Ø,MoS TTM,SEC,Flags
-NVDA,Semiconductors,nein,nein,100.0,30.0,100%,< -100%,< -100%,< -100%,< -100%,ok,duenn
-RL,Apparel Manufacturing,nein,nein,78.1,31.1,100%,-73.2%,< -100%,-55.0%,-51.3%,ok,duenn
-NEM,Gold,Beobachtung,Beobachtung,71.9,34.5,100%,-74.2%,17.3%,-35.6%,40.4%,ok,duenn zyk:norm<7J beobachten
-CAT,Farm & Heavy Construction Machinery,Prüfen (SBC fehlt),Prüfen (SBC fehlt),69.3,8.7,80%,< -100%,< -100%,< -100%,< -100%,⚠ Quellen weichen ab,valu:duenn duenn sec:abweichend SBC n/a (ohne SBC) zyk:norm<7J
-ROK,Specialty Industrial Machinery,nein,nein,68.6,11.9,100%,< -100%,< -100%,< -100%,< -100%,ok,duenn zyk:norm<7J
-FCX,Copper,nein,nein,54.2,8.5,100%,< -100%,< -100%,< -100%,< -100%,ok,duenn zyk:norm<7J
-XOM,Oil & Gas Integrated,Prüfen (SBC fehlt),Prüfen (SBC fehlt),52.7,0.0,80%,< -100%,< -100%,< -100%,< -100%,ok,valu:duenn duenn SBC n/a (ohne SBC) zyk:norm<7J
-BIIB,Drug Manufacturers - General,nein,nein,50.9,24.4,100%,< -100%,-99.7%,< -100%,-70.6%,⚠ Quellen weichen ab,duenn sec:abweichend
-AMT,REIT - Specialty,nein,nein,48.9,27.8,70%,< -100%,< -100%,< -100%,< -100%,ok,valu:duenn duenn
-PLD,REIT - Industrial,nein,nein,48.3,19.0,70%,< -100%,< -100%,< -100%,< -100%,ok,valu:duenn duenn
-CARR,Building Products & Equipment,nein,nein,48.3,9.0,100%,< -100%,-58.7%,< -100%,-82.8%,⚠ Quellen weichen ab,duenn sec:abweichend zyk:norm<7J
-JPM,Banks - Diversified,Prüfen (SBC fehlt),Prüfen (SBC fehlt),44.8,n/a,30%,n/a,n/a,n/a,n/a,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn SBC n/a (ohne SBC)
-DE,Farm & Heavy Construction Machinery,nein,nein,44.1,1.0,80%,n/a,n/a,n/a,n/a,⚠ Quellen weichen ab,valu:duenn duenn sec:abweichend zyk:norm<7J
-BAC,Banks - Diversified,nein,nein,43.6,n/a,60%,< -100%,< -100%,< -100%,< -100%,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
-TRV,Insurance - Property & Casualty,Prüfen (SBC fehlt),Prüfen (SBC fehlt),41.6,n/a,60%,51.1%,58.2%,51.1%,51.1%,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn SBC n/a (ohne SBC)
-CSX,Railroads,Prüfen (SBC fehlt),Prüfen (SBC fehlt),38.4,2.4,80%,< -100%,< -100%,< -100%,< -100%,ok,valu:duenn duenn SBC n/a (ohne SBC) zyk:norm<7J
-WFC,Banks - Diversified,Prüfen (SBC fehlt),Prüfen (SBC fehlt),36.8,n/a,50%,< -100%,n/a,< -100%,< -100%,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn SBC n/a (ohne SBC)
-AIG,Insurance - Diversified,Prüfen (SBC fehlt),Prüfen (SBC fehlt),36.3,n/a,60%,-8.1%,-48.1%,-8.1%,-8.1%,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn SBC n/a (ohne SBC)
-MS,Capital Markets,nein,nein,34.5,n/a,40%,n/a,n/a,n/a,n/a,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
-MET,Insurance - Life,Prüfen (SBC fehlt),Prüfen (SBC fehlt),32.1,n/a,60%,75.4%,78.2%,75.4%,75.4%,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn SBC n/a (ohne SBC)
-GS,Capital Markets,nein,nein,30.2,n/a,40%,n/a,n/a,n/a,n/a,ok,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
-EQIX,REIT - Specialty,nein,nein,28.6,n/a,50%,n/a,n/a,n/a,n/a,ok,valu:duenn duenn
-AEE,Utilities - Regulated Electric,nein,nein,16.1,31.3,80%,n/a,n/a,n/a,n/a,ok,valu:duenn duenn
-DUK,Utilities - Regulated Electric,Prüfen (SBC fehlt),Prüfen (SBC fehlt),15.7,n/a,60%,n/a,n/a,n/a,n/a,ok,valu:duenn duenn SBC n/a (ohne SBC)
-DOW,Chemicals,Prüfen (SBC fehlt),Prüfen (SBC fehlt),0.0,n/a,60%,n/a,n/a,n/a,< -100%,⚠ Quellen weichen ab,valu:duenn duenn sec:abweichend SBC n/a (ohne SBC) zyk:norm<7J
+Ticker,Industry,Industry-Gruppe,Status (alle Modi),Status (jüngste 2),Quality,Value,Datenabdeckung,MoS Ø3J,MoS jüngstes GJ,MoS TTM Ø,MoS TTM,SEC,SEC-Detail,Flags
+NVDA,Semiconductors,standard,nein,nein,100.0,30.0,100%,< −100%,< −100%,< −100%,< −100%,ok,,duenn
+RL,Apparel Manufacturing,standard,nein,nein,78.1,31.1,100%,-73.2%,< −100%,-55.0%,-51.3%,ok,,duenn
+NEM,Gold,cyclicals,Beobachtung,Beobachtung,71.9,34.5,100%,-74.2%,17.3%,-35.6%,40.4%,ok,,duenn zyk:norm<7J beobachten
+ROK,Specialty Industrial Machinery,cyclicals,nein,nein,68.6,11.9,100%,< −100%,< −100%,< −100%,< −100%,ok,,duenn zyk:norm<7J
+CAT,Farm & Heavy Construction Machinery,cyclicals,nein,nein,69.3,8.7,80%,< −100%,< −100%,< −100%,< −100%,⚠ Quellen weichen ab,Capex FY2025 +51.9%; Capex FY2024 +61.7%; Capex FY2023 +93.6%; Capex FY2022 +100.5%,valu:duenn duenn sec:abweichend SBC n/a (ohne SBC) zyk:norm<7J
+BIIB,Drug Manufacturers - General,standard,nein,nein,50.9,24.4,100%,< −100%,-99.7%,< −100%,-70.6%,⚠ Quellen weichen ab,Capex FY2025 +53.1%; Capex FY2024 +134.1%; Capex FY2023 +12.4%,duenn sec:abweichend
+FCX,Copper,cyclicals,nein,nein,54.2,8.5,100%,< −100%,< −100%,< −100%,< −100%,ok,,duenn zyk:norm<7J
+XOM,Oil & Gas Integrated,cyclicals,nein,nein,52.7,0.0,80%,< −100%,< −100%,< −100%,< −100%,ok,,valu:duenn duenn SBC n/a (ohne SBC) zyk:norm<7J
+CARR,Building Products & Equipment,cyclicals,nein,nein,48.3,9.0,100%,< −100%,-58.7%,< −100%,-82.8%,⚠ Quellen weichen ab,SBC FY2024 -12.2%; SBC FY2023 -12.3%; Capex FY2023 -6.4%; SBC FY2022 -15.6%; Capex FY2022 -10.2%,duenn sec:abweichend zyk:norm<7J
+DE,Farm & Heavy Construction Machinery,cyclicals,nein,nein,44.1,1.0,80%,n/a,n/a,n/a,n/a,⚠ Quellen weichen ab,Capex FY2025 +210.9%; Capex FY2024 +192.8%; Capex FY2023 +198.3%; Capex FY2022 +234.0%,valu:duenn duenn sec:abweichend zyk:norm<7J
+CSX,Railroads,cyclicals,nein,nein,38.4,2.4,80%,< −100%,< −100%,< −100%,< −100%,ok,,valu:duenn duenn SBC n/a (ohne SBC) zyk:norm<7J
+JPM,Banks - Diversified,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,10%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+BAC,Banks - Diversified,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,10%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+GS,Capital Markets,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,10%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+MS,Capital Markets,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,10%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+WFC,Banks - Diversified,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,10%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+TRV,Insurance - Property & Casualty,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+AIG,Insurance - Diversified,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+MET,Insurance - Life,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn moat:duenn valu:duenn duenn
+AMT,REIT - Specialty,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn valu:duenn duenn
+PLD,REIT - Industrial,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn valu:duenn duenn
+EQIX,REIT - Specialty,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn valu:duenn duenn
+DOW,Chemicals,cyclicals,nein,nein,n/a,n/a,60%,n/a,n/a,n/a,< −100%,⚠ Quellen weichen ab,Capex FY2023 +5.1%; Capex FY2022 +12.9%,valu:duenn duenn sec:abweichend SBC n/a (ohne SBC) zyk:norm<7J
+AEE,Utilities - Regulated Electric,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn valu:duenn duenn
+DUK,Utilities - Regulated Electric,special,Sonderregel nötig,Sonderregel nötig,n/a,n/a,30%,n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),n/a (Sonderregel),ok,,prof:duenn stab:duenn cash:duenn valu:duenn duenn

@@ -82,8 +82,10 @@ def test_aapl_fcf_yield_sbc_plausible(aapl_metrics):
 
 
 def test_aapl_fcf_yield_sbc_nan_when_sbc_missing(aapl_metrics):
-    """v34: Fehlende SBC in allen Jahren -> fcf_sbc = NaN -> FCF-Yield SBC = NaN
-    (nie 0, nie Roh-FCF); Pipeline setzt Status 'Pruefen (SBC fehlt)' (nie Kandidat)."""
+    """v34/v35: Fehlende SBC in allen Jahren -> fcf_sbc = NaN -> FCF-Yield SBC = NaN
+    (nie 0, nie Roh-FCF); nie Kandidat. v35: Status 'Pruefen (SBC fehlt)' NUR,
+    wenn ohne SBC Quality >= 60 UND MoS >= 30 % -- AAPL (teuer, MoS < 30 %)
+    bekommt den normalen Status."""
     from config import load_config
     from scoring.pipeline import evaluate_ticker
     for fy in aapl_metrics.years:
@@ -92,9 +94,12 @@ def test_aapl_fcf_yield_sbc_nan_when_sbc_missing(aapl_metrics):
     cfg = load_config()
     cfg["sec"] = {"enabled": False}
     out = evaluate_ticker(aapl_metrics, cfg)
-    assert out["row"]["status"] == "Prüfen (SBC fehlt)"
-    assert out["row"]["is_buy"] is False
-    assert "SBC n/a (ohne SBC)" in out["row"]["flags"]
+    row = out["row"]
+    assert row["is_buy"] is False
+    assert "SBC n/a (ohne SBC)" in row["flags"]
+    # v35: AAPL ohne SBC hat MoS < 30 % -> normaler Status, kein Pruefstatus
+    assert row["status"] != "Kandidat"
+    assert row["status_pruefen_sbc"] is (row["status"] == "Prüfen (SBC fehlt)")
 
 
 def test_aapl_criterion_fcf_yield_sbc_avg3(aapl_metrics, cfg):

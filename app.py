@@ -83,10 +83,13 @@ def _fmt_pct(v: float) -> str:
     return "n/a" if (v != v) else f"{v:.1%}"
 
 
-def _fmt_mos(v: float, le0: bool = False) -> str:
+def _fmt_mos(v: float, le0: bool = False, special: bool = False) -> str:
     # v33: Start-FCF <= 0 -> "Start-FCF <= 0" statt n/a
     if le0:
         return "Start-FCF ≤ 0"
+    # v35: Sektor-Sonderregel -> DCF nicht berechnet
+    if special:
+        return "n/a (Sonderregel)"
     # v34: MoS unter -100 % -> "< -100 %"
     if v == v and v < -1.0:
         return "< −100 %"
@@ -147,12 +150,23 @@ def page_ranking() -> None:
     view["ND/EBITDA"] = view["nd_ebitda"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.2f}")
     view["EV/EBIT rel."] = view["ev_ebit_med"].map(lambda v: "n/a" if math.isnan(v) else f"{v:.1f}")
     view["MoS (Base)"] = view.apply(
-        lambda r: _fmt_mos(r["margin_of_safety"], bool(r.get("dcf_fcf_le0", False))), axis=1)  # v33: Start-FCF <= 0
+        lambda r: _fmt_mos(r["margin_of_safety"], bool(r.get("dcf_fcf_le0", False)),
+                           bool(r.get("sector_special", False))), axis=1)  # v33: Start-FCF <= 0; v35: Sonderregel
     # v27: MoS (Base) je Startwert nebeneinander (Ø3J / jüngstes GJ / TTM Ø / TTM)
-    view["MoS Ø3J"] = view["mos_avg3"].map(_fmt_pct)
-    view["MoS jüngstes GJ"] = view["mos_latest"].map(_fmt_pct)
-    view["MoS TTM Ø"] = view["mos_ttm"].map(_fmt_pct)
-    view["MoS TTM"] = view["mos_ttm_only"].map(_fmt_pct)
+    # v35: Sektor-Sonderregel -> "n/a (Sonderregel)" statt n/a
+    _sp = view["sector_special"].fillna(False).astype(bool) if "sector_special" in view else False
+    view["MoS Ø3J"] = [
+        "n/a (Sonderregel)" if sp else _fmt_pct(v)
+        for sp, v in zip(view["sector_special"].fillna(False), view["mos_avg3"])]
+    view["MoS jüngstes GJ"] = [
+        "n/a (Sonderregel)" if sp else _fmt_pct(v)
+        for sp, v in zip(view["sector_special"].fillna(False), view["mos_latest"])]
+    view["MoS TTM Ø"] = [
+        "n/a (Sonderregel)" if sp else _fmt_pct(v)
+        for sp, v in zip(view["sector_special"].fillna(False), view["mos_ttm"])]
+    view["MoS TTM"] = [
+        "n/a (Sonderregel)" if sp else _fmt_pct(v)
+        for sp, v in zip(view["sector_special"].fillna(False), view["mos_ttm_only"])]
     # v27: Zwei Stufen -- Kandidat / Beobachtung (mit entscheidendem Modus)
     view["Status"] = view["status"].map(lambda v: str(v))
     # v30: Status unter beiden Kandidatenregeln nebeneinander
@@ -171,7 +185,9 @@ def page_ranking() -> None:
     # v28: SEC-EDGAR-Abgleich in der Rangliste sichtbar (US-Ticker)
     def _sec_col(r):
         if r["sec_check_flag"]:
-            return "⚠ Quellen weichen ab"
+            detail = (r.get("sec_detail") or "").strip()
+            # v35: Detail (Feld/Jahr/%) in der Zelle; im Tooltip vollstaendig
+            return "⚠ Quellen weichen ab" + (f" ({detail})" if detail else "")
         if r["sec_check_ok"]:
             return "ok"
         note = (r.get("sec_check_note") or "")
@@ -181,10 +197,14 @@ def page_ranking() -> None:
             return "n/a (kein US)"
         return "n/a"
     view["SEC"] = df.apply(_sec_col, axis=1)
-    # v26: MoS (Base) mit alternativer Nettoverschuldung
-    view["MoS alt. ND"] = view["mos_base_alt_nd"].map(_fmt_pct)
-    view["MoS Bear"] = view["mos_bear"].map(_fmt_pct)
-    view["MoS Bull"] = view["mos_bull"].map(_fmt_pct)
+    # v26: MoS (Base) mit alternativer Nettoverschuldung; v35: Sonderregel -> "n/a (Sonderregel)"
+    _sp = view["sector_special"].fillna(False)
+    view["MoS alt. ND"] = ["n/a (Sonderregel)" if sp else _fmt_pct(v)
+                           for sp, v in zip(_sp, view["mos_base_alt_nd"])]
+    view["MoS Bear"] = ["n/a (Sonderregel)" if sp else _fmt_pct(v)
+                        for sp, v in zip(_sp, view["mos_bear"])]
+    view["MoS Bull"] = ["n/a (Sonderregel)" if sp else _fmt_pct(v)
+                        for sp, v in zip(_sp, view["mos_bull"])]
     view["Kandidat"] = view["kandidat"].map(lambda v: str(v))
     view["Datenabdeckung"] = view["coverage"].map(lambda v: "n/a" if (v != v) else f"{v:.1%}")
     # v33: Value als "n/a", wenn Datenabdeckung < score_groups.min_coverage_value
@@ -193,9 +213,15 @@ def page_ranking() -> None:
         lambda r: "n/a" if (r["value"] != r["value"]
                             or (r["coverage"] == r["coverage"] and r["coverage"] < min_cov))
         else f"{r['value']:.1f}", axis=1)
+    # v35: Quality als "n/a", wenn Datenabdeckung < score_groups.min_coverage_quality
+    min_cov_q = float(CFG.get("score_groups", {}).get("min_coverage_quality", 0.70))
+    view["Quality"] = view.apply(
+        lambda r: "n/a" if (r["quality"] != r["quality"]
+                            or (r["coverage"] == r["coverage"] and r["coverage"] < min_cov_q))
+        else f"{r['quality']:.1f}", axis=1)
     view = view.rename(columns={"ticker": "Ticker", "name": "Name", "sector": "Sektor",
                                 "source": "Quelle", "score": "Score",
-                                "quality": "Quality", "flags": "Flags"})
+                                "flags": "Flags"})
     show_cols = ["Ticker", "Name", "Sektor", "Land", "Quelle", "Score", "Quality", "Quality-Rang", "Value",
                  "Datenabdeckung", "FCF-Yield", "FCF-Yield nach SBC", "FCF-Yield nach SBC Ø3J",
                  "ROIC Ø", "ROIC letztes GJ", "ND/EBITDA", "EV/EBIT rel.",
@@ -206,7 +232,9 @@ def page_ranking() -> None:
     # v34: beide Kandidaten-Labels zaehlen als Kandidat (streng/aktuell)
     view["_kauf"] = view["status"].isin(["Kandidat"]).astype(int)
     view["_watch"] = (view["Status"] == "Beobachtung").astype(int)
-    view["_mos"] = pd.to_numeric(view["MoS (Base)"].str.replace("n/a", "").str.rstrip("%"), errors="coerce")
+    view["_mos"] = pd.to_numeric(
+        view["MoS (Base)"].str.replace("n/a (Sonderregel)", "").str.replace("n/a", "")
+        .str.replace("< −100 %", "-100").str.rstrip("%"), errors="coerce")
     view = view.sort_values(["_kauf", "_watch", "_mos"], ascending=[False, False, False])
     view = view[show_cols]
     st.caption(f"{len(view)} bewertet, {len(excluded)} ausgeschlossen "
@@ -250,7 +278,7 @@ def page_ranking() -> None:
         "Land": st.column_config.TextColumn("Land", help="Land als Kürzel (US, DE, ...)"),
         "Quelle": st.column_config.TextColumn("Quelle", help="Datenquelle (yfinance / fmp / demo)"),
         "Score": st.column_config.NumberColumn("Score", help="Gesamtscore = 0,75×Quality + 0,25×Value (0–100)", format="%.1f"),
-        "Quality": st.column_config.NumberColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat", format="%.1f"),
+        "Quality": st.column_config.TextColumn("Quality", help="Quality-Score (0–100): Profitabilität, Stabilität, Cashflow, Moat; n/a wenn Datenabdeckung < score_groups.min_coverage_quality (70 %)"),
         "Quality-Rang": st.column_config.TextColumn("Quality-Rang", help="Rang nach Quality-Score im Universum (1 = bester); Gleichstand = gleicher Rang; n/a = Quality nicht berechenbar"),
         "Value": st.column_config.TextColumn("Value", help="Value-Score (0–100); n/a wenn Datenabdeckung < score_groups.min_coverage_value (70 %)"),
         "Datenabdeckung": st.column_config.TextColumn("Datenabdeckung", help="Anteil bewerteter Kriterien-Gewichte (n/a-Kriterien herausgerechnet, übrige renormalisiert)"),
@@ -271,7 +299,7 @@ def page_ranking() -> None:
         "MoS Bear": st.column_config.TextColumn("MoS Bear", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bear-Szenario)"),
         "MoS Bull": st.column_config.TextColumn("MoS Bull", help="Margin of Safety = 1 − Kurs / innerer Wert je Aktie (DCF-Bull-Szenario)"),
         "Kandidat": st.column_config.TextColumn("Kandidat", help="Kaufkandidat: ja = alle 3 Bedingungen erfuellt (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs); nein: mit Begruendung, welche Bedingung fehlt"),
-        "SEC": st.column_config.TextColumn("SEC", help="SEC-EDGAR-Abgleich (US-Ticker): ok = OCF/Capex/SBC gegen data.sec.gov geprueft, Abweichung <= 5 %; ⚠ Quellen weichen ab = Abweichung > 5 % in mind. 1 Jahr; n/a (kein US) = kein US-Ticker; aus = deaktiviert"),
+        "SEC": st.column_config.TextColumn("SEC", help="SEC-EDGAR-Abgleich (US-Ticker): ok = OCF/Capex/SBC gegen data.sec.gov geprueft, Abweichung <= 5 %; ⚠ Quellen weichen ab = Abweichung > 5 % mit Detail (Feld FY Jahr +/-%); n/a (kein US) = kein US-Ticker; aus = deaktiviert"),
         "Flags": st.column_config.TextColumn("Flags", help="blk:duenn = Block mit >30 % fehlenden Daten · duenn = Kriterium mit < 5 Jahren Daten · kl.Kapital = ROIC > 100 % (kleine/negative Kapitalbasis) · kauf = Kaufkandidat (Quality ≥ 60, MoS Base ≥ 30 %, Bear ≥ 80 % Kurs)"),
     }
     st.dataframe(styler, width="stretch", hide_index=True, column_config=col_cfg)

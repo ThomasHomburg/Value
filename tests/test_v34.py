@@ -60,20 +60,36 @@ def _mk(ticker="T", mcap=1e12, sbc_na=False, fcf_vals=None):
 # ---------- (1) SBC fehlt in allen Jahren ----------
 
 def test_sbc_fehlt_allen_jahren_pruefstatus_nie_kandidat(cfg):
-    """SBC-Zeile fehlt in allen Jahren -> Status 'Pruefen (SBC fehlt)', nie Kandidat,
-    Flag 'SBC n/a (ohne SBC)'; DCF laeuft ohne SBC (Fallback)."""
+    """v34/v35: SBC-Zeile fehlt in allen Jahren -> nie Kandidat, Flag
+    'SBC n/a (ohne SBC)'; DCF laeuft ohne SBC (Fallback). v35: Status
+    'Pruefen (SBC fehlt)' NUR, wenn ohne SBC Quality >= 60 UND MoS >= 30 %
+    -- hier mit niedriger Marktkap. (Kurs 100, MoS > 30 %) erfuellt."""
     cfg = dict(cfg)
     cfg["sec"] = {"enabled": False}
-    m = _mk(sbc_na=True)
+    m = _mk(sbc_na=True, mcap=2e11)  # Kurs = 2e11/2e9 = 100 -> MoS > 30 %
     dcf = compute_dcf(m, cfg)
     assert dcf.sbc_missing is True          # DCF ohne SBC (Roh-FCF)
     assert dcf.fcf_normalized == dcf.fcf_normalized
     out = evaluate_ticker(m, cfg)
     row = out["row"]
-    assert row["status"] == "Pr\u00fcfen (SBC fehlt)"
-    assert row["status_all"] == "Pr\u00fcfen (SBC fehlt)"
-    assert row["status_recent2"] == "Pr\u00fcfen (SBC fehlt)"
+    assert row["status"] == "Prüfen (SBC fehlt)"
+    assert row["status_all"] == "Prüfen (SBC fehlt)"
+    assert row["status_recent2"] == "Prüfen (SBC fehlt)"
     assert row["status_pruefen_sbc"] is True
+    assert row["is_buy"] is False
+    assert "SBC n/a (ohne SBC)" in row["flags"]
+
+
+def test_sbc_fehlt_aber_mos_unter_30_prozent_kein_pruefstatus(cfg):
+    """v35 (2): SBC fehlt, aber MoS < 30 % (teurer Ticker) -> normaler Status,
+    NICHT 'Pruefen (SBC fehlt)'; Flag und nie-Kandidat bleiben."""
+    cfg = dict(cfg)
+    cfg["sec"] = {"enabled": False}
+    m = _mk(sbc_na=True, mcap=1e12)  # Kurs 500 -> MoS < 0
+    out = evaluate_ticker(m, cfg)
+    row = out["row"]
+    assert row["status_pruefen_sbc"] is False
+    assert row["status"] != "Prüfen (SBC fehlt)"
     assert row["is_buy"] is False
     assert "SBC n/a (ohne SBC)" in row["flags"]
 
