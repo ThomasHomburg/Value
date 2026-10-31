@@ -46,6 +46,53 @@ def _pct(v: float) -> str:
     return "n/a" if v != v else f"{v:.1%}"
 
 
+def fmt_szenario_vps(d) -> tuple[str, str, str]:
+    """v37 (2): Bear/Base/Bull als Text fuer die Modus-Tabelle.
+
+    Start-FCF <= 0 (d.fcf_le0) -> alle drei Szenarien "n/a (Start-FCF \u2264 0)"
+    statt Zahlen (MoS ist dann nicht definiert)."""
+    if getattr(d, "fcf_le0", False):
+        na = "n/a (Start-FCF \u2264 0)"
+        return na, na, na
+    out = []
+    for name in ("bear", "base", "bull"):
+        sc = d.scenarios.get(name) if hasattr(d, "scenarios") else None
+        v = sc.value_per_share if sc is not None else float("nan")
+        out.append(_f(v))
+    return tuple(out)
+
+
+def fmt_scenario_growth(d) -> str:
+    """v37 (1): tatsaechliche Wachstumsraten J. 1-5 je Szenario aus DcfResult,
+    z. B. "Bear -9.7%, Base -6.7%, Bull 0.0%" (CAGR < 0) bzw. "Bear 0.0%, ..."."""
+    sg = getattr(d, "scenario_growth", None) or {}
+    parts = []
+    for name in ("bear", "base", "bull"):
+        g = sg.get(name, float("nan"))
+        parts.append(f"{name.capitalize()} {_pct(g)}")
+    return ", ".join(parts)
+
+
+def erklaerung_xom(xo: dict) -> list[str]:
+    """v37 (1): 3 Saetze XOM -- nennt die tatsaechlichen Wachstumsraten je Szenario
+    aus der DCF-Funktion (DcfResult.scenario_growth), nicht den Festtext."""
+    modes = xo["modes"].values()
+    vps = [d.scenarios["base"].value_per_share for d in modes
+           if "base" in d.scenarios and d.scenarios["base"].value_per_share == d.scenarios["base"].value_per_share]
+    mos_vals = [d.margin_of_safety for d in modes if d.margin_of_safety == d.margin_of_safety]
+    fcf_vals = [d.fcf_normalized / 1e9 for d in modes]
+    dcf = xo["dcf"]
+    lines = [
+        "XOM (MoS < -100 %):",
+        f"  Der DCF ergibt je nach Startwert-Modus einen inneren Wert von nur {min(vps):,.2f} bis {max(vps):,.2f} USD je Aktie",
+        f"  (Start-FCF {min(fcf_vals):,.1f}-{max(fcf_vals):,.1f} Mrd. USD ohne SBC, Nettoverschuldung {dcf.net_debt / 1e9:,.1f} Mrd., "
+        f"Umsatz-CAGR {_pct(dcf.revenue_cagr)} -> Szenario-Wachstum J. 1-5: {fmt_scenario_growth(dcf)}),",
+        f"  der reale Kurs liegt mit {xo['price']:,.2f} USD beim etwa {xo['price'] / max(vps):.1f}- bis {xo['price'] / min(vps):.1f}-Fachen dieses Werts, "
+        f"daher MoS = 1 - Kurs/Wert = {min(mos_vals):.0%} bis {max(mos_vals):.0%}.",
+    ]
+    return lines
+
+
 def main() -> None:
     cfg = load_config()
     providers = build_providers("")
@@ -128,10 +175,9 @@ def main() -> None:
         w(f"  {'Modus':<10} {'Start-FCF':>12} {'Wert/Aktie Bear':>16} {'Base':>10} {'Bull':>10} {'MoS Base':>10} {'MoS bei 10%':>12}")
         for mode in ("avg3", "latest", "ttm", "ttm_only"):
             d = compute_dcf(m, cfg, fcf_mode=mode)
-            bear = d.scenarios["bear"].value_per_share if "bear" in d.scenarios else float("nan")
-            base = d.scenarios["base"].value_per_share if "base" in d.scenarios else float("nan")
-            bull = d.scenarios["bull"].value_per_share if "bull" in d.scenarios else float("nan")
-            w(f"  {mode:<10} {_mrd(d.fcf_normalized):>12} {_f(bear):>16} {_f(base):>10} {_f(bull):>10} {_pct(d.margin_of_safety):>10}"
+            # v37 (2): Start-FCF <= 0 -> "n/a (Start-FCF <= 0)" statt Zahlen
+            bear_s, base_s, bull_s = fmt_szenario_vps(d)
+            w(f"  {mode:<10} {_mrd(d.fcf_normalized):>12} {bear_s:>16} {base_s:>10} {bull_s:>10} {_pct(d.margin_of_safety):>10}"
               f" {_pct(row['mos_robust'] if mode == dcf.fcf_mode else float('nan')):>12}")
         w(f"  aktiver Modus (dcf.fcf_mode={dcf.fcf_mode}): MoS Base {_pct(row['margin_of_safety'])}, MoS bei 10 % (robust) {_pct(row['mos_robust'])}")
         w(f"  Umsatz-CAGR (Basis-Wachstum): {_pct(dcf.revenue_cagr)} | Diskontsatz {_pct(dcf.discount_rate)} | Terminal Growth {_pct(dcf.terminal_growth)}")
@@ -175,22 +221,10 @@ def main() -> None:
     # XOM-Werte dynamisch aus dem Lauf (statt hartkodiert)
     xom = next((m for m in _LAST if m.ticker == "XOM"), None)
     if xom is not None:
-        xo = _LAST_OUT["XOM"]
-        vps_min = min(d.scenarios["base"].value_per_share for d in xo["modes"].values()
-                      if d.scenarios["base"].value_per_share == d.scenarios["base"].value_per_share)
-        vps_max = max(d.scenarios["base"].value_per_share for d in xo["modes"].values()
-                      if d.scenarios["base"].value_per_share == d.scenarios["base"].value_per_share)
-        mos_vals = [d.margin_of_safety for d in xo["modes"].values() if d.margin_of_safety == d.margin_of_safety]
-        nd_v = xo["dcf"].net_debt / 1e9
-        cagr_v = xo["dcf"].revenue_cagr
-        kurs = xo["price"]
-        fcf_vals = [d.fcf_normalized / 1e9 for d in xo["modes"].values()]
-        w("XOM (MoS < -100 %):")
-        w(f"  Der DCF ergibt je nach Startwert-Modus einen inneren Wert von nur {vps_min:,.2f} bis {vps_max:,.2f} USD je Aktie")
-        w(f"  (Start-FCF {min(fcf_vals):,.1f}-{max(fcf_vals):,.1f} Mrd. USD ohne SBC, Nettoverschuldung {nd_v:,.1f} Mrd., "
-          f"Umsatz-CAGR {cagr_v:.1%} -> Base-Wachstum 0 %),")
-        w(f"  der reale Kurs liegt mit {kurs:,.2f} USD beim etwa {kurs / vps_max:.1f}- bis {kurs / vps_min:.1f}-Fachen dieses Werts, "
-          f"daher MoS = 1 - Kurs/Wert = {min(mos_vals):.0%} bis {max(mos_vals):.0%}.")
+        # v37 (1): Erklaerung nennt die tatsaechlichen Wachstumsraten je Szenario
+        # aus DcfResult.scenario_growth (z. B. "Bear -9.7%, Base -6.7%, Bull 0.0%")
+        for line in erklaerung_xom(_LAST_OUT["XOM"]):
+            w(line)
     w("")
     dow = next((m for m in _LAST if m.ticker == "DOW"), None)
     if dow is not None:
