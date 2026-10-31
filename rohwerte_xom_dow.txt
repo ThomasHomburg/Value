@@ -116,7 +116,7 @@ Datenqualitaet:
   - FY2025: ND (13.2 Mrd.) weicht von Schulden-Cash (15.8 Mrd.) um 2.6 Mrd. ab (> 5% Marktkap.)
 
 ====================================================================================================
-ERKLAERUNG (3 Saetze je Ticker)
+ERKLAERUNG (3 Saetze je Ticker: XOM/DOW)
 
 XOM (MoS < -100 %):
   Der DCF ergibt je nach Startwert-Modus einen inneren Wert von nur 44.89 bis 60.89 USD je Aktie

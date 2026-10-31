@@ -121,8 +121,11 @@ def calc_roic_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
 def calc_roe_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     years = _year_count(m, "net_income")
+    # v38 (1): Jahre mit Eigenkapital <= 0 liefern roe()=NaN -> werden nicht als
+    # verfuegbar gezaehlt (n/a statt 0 Punkte); EK<=0-Jahre zaehlen nicht zu `years`.
     vals = [roe(m, fy) for fy, _ in _values(m, "net_income")]
     vals = [v for v in vals if v == v]
+    years = min(years, len(vals)) if vals else years
     if len(vals) < cfg["min_points_5y"]:
         return _result(float("nan"), True, years, thin)
     return _result(_avg(vals[-5:]), False, years, thin)

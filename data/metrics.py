@@ -102,9 +102,39 @@ def invested_capital(m: TickerMetrics, fy: int) -> float:
     return eq.value + nd.value
 
 
+def invested_capital_ek_le0(m: TickerMetrics, fy: int) -> float:
+    """v38 (1): Nenner bei Eigenkapital <= 0: investiertes Kapital = Schulden +
+    Eigenkapital (statt nur EK + ND, das bei negativem EK klein/negativ waere).
+    Auch das <= 0 -> NaN (ROIC dann n/a)."""
+    y = m.years.get(fy, {})
+    eq = y.get("equity")
+    td = y.get("_total_debt")
+    nd = y.get("net_debt")
+    debt = None
+    if td is not None and not td.is_na():
+        debt = td.value
+    elif nd is not None and not nd.is_na():
+        debt = nd.value  # Naeherung: ND ~ Schulden - Cash
+    if eq is None or eq.is_na() or debt is None or _nan(eq.value, debt):
+        return float("nan")
+    ic = debt + eq.value
+    if ic <= 0:
+        return float("nan")
+    return ic
+
+
 def roic(m: TickerMetrics, fy: int) -> float:
-    """ROIC = NOPAT / investiertes Kapital (Jahresende)."""
-    ic = invested_capital(m, fy)
+    """ROIC = NOPAT / investiertes Kapital (Jahresende).
+
+    v38 (1): bei Eigenkapital <= 0 ist EK + ND als Nenner verzerrt; dann wird
+    Schulden + Eigenkapital verwendet (invested_capital_ek_le0); auch das <= 0
+    -> NaN."""
+    y = m.years.get(fy, {})
+    eq = y.get("equity")
+    if eq is not None and not eq.is_na() and eq.value <= 0:
+        ic = invested_capital_ek_le0(m, fy)
+    else:
+        ic = invested_capital(m, fy)
     np_ = nopat(m, fy)
     if _nan(ic, np_) or ic == 0:
         return float("nan")
@@ -164,9 +194,11 @@ def fcf_yield_raw(m: TickerMetrics, fy: int) -> float:
 
 
 def roe(m: TickerMetrics, fy: int) -> float:
-    """ROE = Nettogewinn / Eigenkapital (Banken-Ersatz fuer ROIC)."""
+    """ROE = Nettogewinn / Eigenkapital (Banken-Ersatz fuer ROIC).
+
+    v38 (1): Eigenkapital <= 0 -> NaN (Jahr wird n/a, nicht 0 Punkte)."""
     ni = m.years.get(fy, {}).get("net_income")
     eq = m.years.get(fy, {}).get("equity")
-    if ni is None or eq is None or _nan(ni.value, eq.value) or eq.value == 0:
+    if ni is None or eq is None or _nan(ni.value, eq.value) or eq.value <= 0:
         return float("nan")
     return ni.value / eq.value

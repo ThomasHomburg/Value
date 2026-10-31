@@ -73,11 +73,16 @@ def test_industry_nicht_sector_pypl_visa_mastercard_keine_banken(cfg):
 
 def test_banken_und_versicherer_ueber_industry(cfg):
     """v28: Industry statt Sector. v35: Banks*/Insurance*/Capital Markets sind
-    jetzt Sektor-Sonderregel ('special'); Asset Management & Co. bleiben
+    jetzt Sektor-Sonderregel ('special'); v38: Asset Management ist AUCH
+    Sonderregel. Diversified Financial Services / Mortgage Finance bleiben
     'financials' (ROE/P-B/Div-Yield)."""
-    for ind in ("Asset Management", "Diversified Financial Services", "Mortgage Finance"):
+    for ind in ("Diversified Financial Services", "Mortgage Finance"):
         m = _mk(industry=ind, sector="Financial Services")
         assert sector_rule(m, cfg).group == "financials", ind
+    # v38 (3): Asset Management -> Sonderregel (wie Banken/Versicherer)
+    for ind in ("Asset Management",):
+        m = _mk(industry=ind, sector="Financial Services")
+        assert sector_rule(m, cfg).group == "special", ind
     # v35: Banken/Versicherer/Capital Markets -> Sonderregel
     for ind in ("Banks - Diversified", "Banks - Regional",
                 "Insurance - Property & Casualty", "Insurance - Life",
@@ -105,9 +110,9 @@ def test_reits_ueber_industry_prefix(cfg):
         assert "Sonderregel" in rule.note
 
 def test_financials_kriterien_aktiv_roic_fcf_nd_na(cfg):
-    """Financials (v28, z. B. Asset Management -- v35-special-Gruppen ausgenommen):
-    ROIC, FCF, ND/EBITDA n/a; ROE, P/B, Div-Yield aktiv."""
-    m = _mk(industry="Asset Management", sector="Financial Services",
+    """Financials (v28, z. B. Diversified Financial Services -- v35/v38-special-
+    Gruppen ausgenommen): ROIC, FCF, ND/EBITDA n/a; ROE, P/B, Div-Yield aktiv."""
+    m = _mk(industry="Diversified Financial Services", sector="Financial Services",
             extras={"price_to_book": Metric("price_to_book", 1.2, "ratio", "", 0),
                     "dividend_yield": Metric("dividend_yield", 0.03, "ratio", "", 0)})
     crits = compute_criteria(m, cfg)
@@ -216,9 +221,11 @@ def test_ausgeschlossene_ticker_mit_grund(cfg):
     for e in excluded:
         assert e["ticker"] and e["name"] and e["reasons"]
     tickers_ex = {e["ticker"] for e in excluded}
+    # v38: DIST (negatives EK) wird nicht mehr wegen EK ausgeschlossen, sondern
+    # wegen Value-Trap (sinkender Umsatz); MICR wegen Marktkap.
     assert tickers_ex == {"DIST", "MICR"}
     gruende = {e["ticker"]: "; ".join(e["reasons"]) for e in excluded}
-    assert "Eigenkapital" in gruende["DIST"]
+    assert "Durchschnitts-FCF" in gruende["DIST"]  # v38: nicht mehr EK, sondern neg. O-FCF
     assert "Marktkap" in gruende["MICR"]
 
 

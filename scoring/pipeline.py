@@ -278,6 +278,14 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     flag_parts = [f"{b[:4]}:duenn" for b, f in result["block_flags"].items() if f]
     if thin:
         flag_parts.append("duenn")
+    # v38 (1): negativer EK (neuestes Jahr) -> Flag "ek_negativ" (kein Ausschluss,
+    # wenn filters.exclusion.negative_equity: false)
+    latest_eq = m.years[latest_fy].get("equity") if m.years else None
+    if latest_eq is not None and not latest_eq.is_na() and latest_eq.value <= 0:
+        flag_parts.append("ek_negativ")
+        logger.warning("%s: Eigenkapital negativ (FY%d: %.2f Mrd.) -> Flag 'ek_negativ'; "
+                       "ROE n/a in EK<=0-Jahren, ROIC mit Schulden+EK als Nenner",
+                       m.ticker, latest_fy, latest_eq.value / 1e9)
     # ROIC > 100 % entsteht typischerweise durch eine kleine/negative Kapitalbasis
     # (z. B. Net Cash wie bei AAPL) -- Anzeige begrenzen und flaggen.
     roic5 = criteria["roic_avg5"].value

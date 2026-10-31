@@ -154,6 +154,7 @@ Umsatz = 391035000000 USD). Alle Kennzahlen bleiben absolut; Schwellen in
 - [x] 7. Sektor-Sonderregeln (Banken/Versicherer/REITs/Versorger ueber Industry -> MoS n/a (Sonderregel), Status Sonderregel noetig; PYPL/V/MA bleiben Standardmodell)
 - [x] 8. Universum erweitern, Batch-Lauf (`run_ranking.py --tickers CSV --batch 20 --pause 2 --cache .ranking_cache.json`; Wiederaufnahme + Fehlerlog; Volllauf S&P 500 wartet auf Freigabe)
 - [x] v37: Szenario-Wachstum bei CAGR < 0 (Base = CAGR, Bear = CAGR - 3 pp, Bull = 0 %), Quality-Abdeckung nur ueber Quality-Bloecke (DOW liefert Quality-Score), Capex-Pruefstatus nur wenn Diff > 10 % des OCF in >= 2 Jahren (MA ohne, CAT/DE mit; SEC-Detail in Mrd. USD + % des OCF), Testlauf 28 Ticker neu (testlauf_25.csv + testlauf_fehler.txt)
+- [x] v38: negatives Eigenkapital kein Ausschluss mehr (Flag `ek_negativ`, `filters.exclusion.negative_equity: false`; ROE n/a in EK<=0-Jahren, ROIC mit Schulden+EK als Nenner; MCD/PM/SBUX/ORLY/LOW bewertet) + Asset Management als Sektor-Sonderregel (NTRS/STT/AMP/BLK/BX/KKR; CME/ICE/SPGI/MCO bleiben Normalmodell) + Mini-CSV-Lauf `run_ranking.py --tickers ticker_test_v38.csv` (18 Ticker, 18/0/0)
 
 ## Tests
 

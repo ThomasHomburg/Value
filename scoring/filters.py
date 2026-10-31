@@ -55,9 +55,12 @@ def check_filters(m: TickerMetrics, cfg: dict) -> list[str]:
     if len(fcf_vals) >= 5 and _avg(fcf_vals[-5:]) < cfg["min_avg_fcf_5y_usd"]:
         reasons.append("Negativer Durchschnitts-FCF (5 J.)")
 
-    latest_equity = m.latest("equity")
-    if latest_equity is not None and not latest_equity.is_na() and latest_equity.value < cfg["min_equity_usd"]:
-        reasons.append(f"Eigenkapital negativ ({latest_equity.value / 1e9:.2f} Mrd.)")
+    # v38 (1): negativer EK schliesst nur aus, wenn exclusion.negative_equity: true
+    # (alte Verhalten). Sonst wird der Ticker normal bewertet + Flag "ek_negativ".
+    if bool(cfg.get("exclusion", {}).get("negative_equity", False)):
+        latest_equity = m.latest("equity")
+        if latest_equity is not None and not latest_equity.is_na() and latest_equity.value < cfg["min_equity_usd"]:
+            reasons.append(f"Eigenkapital negativ ({latest_equity.value / 1e9:.2f} Mrd.)")
 
     rev = [m.years[fy]["revenue"].value for fy in sorted(m.years)
            if "revenue" in m.years[fy] and not m.years[fy]["revenue"].is_na()]

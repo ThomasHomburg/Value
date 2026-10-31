@@ -43,12 +43,17 @@ providers:
 filters:
   # Harte Ausschlussfilter (vor dem Scoring). Betraege in absoluten USD.
   min_market_cap_usd: 500000000     # Marktkapitalisierung < 500 Mio. USD
+  # v38 (1): Schalter fuer das alte Verhalten "Eigenkapital negativ -> Ausschluss".
+  # false (Default): negativer EK schliesst NICHT aus; Ticker wird normal bewertet
+  # mit Flag "ek_negativ" (roe_avg5 n/a in EK<=0-Jahren, ROIC nutzt EK+ND als Nenner).
+  exclusion:
+    negative_equity: false          # true stellt den alten Ausschluss wieder her
   # v29: Jahre mit tatsaechlichen Werten (nicht Spalten): ein Jahr zaehlt nur,
   # wenn mindestens eine Kernkennzahl (revenue/ebit/net_income/ocf/equity)
   # einen Wert ungleich NaN hat. Leere Spalten zaehlen nicht.
   min_history_years: 4              # weniger als 4 Jahre mit Werten -> Ausschluss
   min_avg_fcf_5y_usd: 0             # Ø-FCF ueber 5 Jahre > 0 (negativ)
-  min_equity_usd: 0                 # Eigenkapital < 0 (negativ)
+  min_equity_usd: 0                 # nur aktiv, wenn exclusion.negative_equity: true
   min_revenue_cagr_5y: -0.03        # Umsatz-CAGR 5 J. < -3 % (Value-Trap-Filter)
   # Hinweis: min_avg_fcf_5y_usd und min_equity_usd vergleichen Statement-Werte
   # (reportedCurrency) mit USD-Schwellen; fuer Nicht-USD-Ticker siehe FX-Modul.
@@ -264,6 +269,8 @@ sector_rules:
         - "Insurance - *"
         - "REIT - *"
         - "Utilities - *"
+        - "Asset Management"        # v38 (3): Asset Manager + Custody-Banken (NTRS, STT, AMP, BLK, BX, KKR)
+        # NICHT dabei: "Financial Data & Stock Exchanges" (CME, ICE, SPGI, MCO, ...) -> Normalmodell
 
 score_groups:
   # Quality-Score und Value-Score werden getrennt berechnet (gewichtete Summe

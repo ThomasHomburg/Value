@@ -31,6 +31,10 @@ from scoring.pipeline import evaluate_ticker
 from valuation.dcf import compute_dcf
 
 TICKERS = ["XOM", "DOW"]
+# v38 (2): Diagnose Ueberlauf bei hohem Wachstum -- optional per CLI:
+#   python rohwerte_check.py RDDT STT
+if len(sys.argv) > 1:
+    TICKERS = [a.upper() for a in sys.argv[1:]]
 OUT = Path(__file__).resolve().parent / "rohwerte_xom_dow.txt"
 
 
@@ -101,7 +105,7 @@ def main() -> None:
     global _LAST, _LAST_OUT
     _LAST, _LAST_OUT = [], {}
 
-    w("rohwerte_xom_dow.txt -- Rohwerte fuer XOM und DOW (live, wie die App)")
+    w(f"rohwerte_xom_dow.txt -- Rohwerte fuer {' und '.join(TICKERS)} (live, wie die App)")
     w(f"Erzeugt von rohwerte_check.py; SEC-Abgleich aktiv wie in config.yaml (sec.enabled={cfg['sec'].get('enabled')})")
     w("=" * 100)
 
@@ -216,18 +220,18 @@ def main() -> None:
     # --- Erklaerungen ---
     w("")
     w("=" * 100)
-    w("ERKLAERUNG (3 Saetze je Ticker)")
+    w(f"ERKLAERUNG (3 Saetze je Ticker: {'/'.join(TICKERS)})")
     w("")
     # XOM-Werte dynamisch aus dem Lauf (statt hartkodiert)
     xom = next((m for m in _LAST if m.ticker == "XOM"), None)
-    if xom is not None:
+    if xom is not None and "XOM" in _LAST_OUT:
         # v37 (1): Erklaerung nennt die tatsaechlichen Wachstumsraten je Szenario
         # aus DcfResult.scenario_growth (z. B. "Bear -9.7%, Base -6.7%, Bull 0.0%")
         for line in erklaerung_xom(_LAST_OUT["XOM"]):
             w(line)
     w("")
     dow = next((m for m in _LAST if m.ticker == "DOW"), None)
-    if dow is not None:
+    if dow is not None and "DOW" in _LAST_OUT:
         drow = _LAST_OUT["DOW"]["dcf"]
         dcrits = None
         # Kriterien des DOW-Laufs rekonstruieren (gleiches evaluate_ticker-Ergebnis)

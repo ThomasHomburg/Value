@@ -93,13 +93,16 @@ def demo_companies() -> list[TickerMetrics]:
                      sbc=0.01 * rev)
     companies.append(_synthetic("LEVR", "Levered Corp", "Basic Materials", "US", 25e9, y))
 
-    # Wird ausgeschlossen: negatives Eigenkapital + sinkender Umsatz (Value-Trap)
+    # Wird ausgeschlossen: negativer Durchschnitts-FCF ueber 5 Jahre
+    # (filters.min_avg_fcf_5y_usd: 0; OCF < |Capex| -> FCF < 0).
+    # Das negative Eigenkapital schliesst seit v38 NICHT mehr aus
+    # (Flag "ek_negativ" stattdessen).
     y = {}
     for i, fy in enumerate(range(2021, 2026)):
         rev = 30e9 * (0.94 ** i)
         y[fy] = dict(revenue=rev, gross_profit=0.20 * rev, ebit=-0.05 * rev, ebitda=0.02 + rev,
                      net_income=-0.08 * rev, interest=1e9, tax=0.0, shares=0.5e9,
-                     equity=-5e9, net_debt=20e9, ocf=0.01 * rev, capex=0.02 * rev,
+                     equity=-5e9, net_debt=20e9, ocf=0.005 * rev, capex=-0.02 * rev,
                      sbc=0.005 * rev)
     companies.append(_synthetic("DIST", "Distressed Corp", "Consumer Cyclical", "US", 8e9, y))
 

@@ -59,12 +59,28 @@ def _mk_cagr(cagr: float, fcf: float = 20e9) -> TickerMetrics:
     return m
 
 
-@pytest.mark.parametrize("cagr", [-0.10, 0.0, 0.04, 0.12])
+@pytest.mark.parametrize("cagr", [-0.10, 0.0, 0.04, 0.12, 0.30, 0.60, 1.20])
 def test_wert_je_aktie_bear_le_base_le_bull(cagr):
-    """v37 (1): Wert je Aktie Bear <= Base <= Bull fuer CAGR -10/0/4/12 %."""
+    """v37 (1): Wert je Aktie Bear <= Base <= Bull fuer CAGR -10/0/4/12 %.
+    v38 (2): erweitert um CAGR 30 %, 60 %, 120 % (hohes Wachstum, Caps greifen)."""
     m = _mk_cagr(cagr)
     res = compute_dcf(m, DCF_CFG, fcf_mode="latest")
     assert res.revenue_cagr == pytest.approx(cagr, abs=1e-9)
+    bear = res.scenarios["bear"].value_per_share
+    base = res.scenarios["base"].value_per_share
+    bull = res.scenarios["bull"].value_per_share
+    for v in (bear, base, bull):
+        assert v == v and v > 0
+    assert bear <= base <= bull
+
+
+@pytest.mark.parametrize("cagr", [0.30, 0.60, 1.20])
+def test_wert_je_aktie_bear_le_base_le_bull_kleiner_fcf(cagr):
+    """v38 (2): derselbe Check bei sehr kleinem positivem Start-FCF (1 Mio. USD)
+    -- Skalierung des Start-FCF darf die Szenario-Reihenfolge nicht kippen."""
+    m = _mk_cagr(cagr, fcf=1e6)
+    res = compute_dcf(m, DCF_CFG, fcf_mode="latest")
+    assert res.fcf_normalized > 0 and not res.fcf_le0
     bear = res.scenarios["bear"].value_per_share
     base = res.scenarios["base"].value_per_share
     bull = res.scenarios["bull"].value_per_share
