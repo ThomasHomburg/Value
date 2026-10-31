@@ -150,7 +150,21 @@ def main() -> None:
     # Provider-Modus: Auswahl per Ticker-Suffix (FMP fuer US, yfinance sonst)
     providers = build_providers(api_key)
     if args.tickers:
-        tickers = load_ticker_file(args.tickers)
+        # v38: --tickers-Datei fehlt oder liefert 0 Ticker -> Abbruch mit
+        # Fehlermeldung + Exit-Code 1, KEINE leere Ergebnis-CSV schreiben
+        if not Path(args.tickers).exists():
+            print(f"Fehler: Ticker-Datei nicht gefunden: {args.tickers}", file=sys.stderr)
+            sys.exit(1)
+        try:
+            tickers = load_ticker_file(args.tickers)
+        except Exception as exc:
+            print(f"Fehler: Ticker-Datei {args.tickers} nicht lesbar ({exc}); "
+                  f"Spalte 'ticker' pruefen", file=sys.stderr)
+            sys.exit(1)
+        if not tickers:
+            print(f"Fehler: 0 Ticker gelesen aus {args.tickers}; "
+                  f"Spalte 'ticker' pruefen", file=sys.stderr)
+            sys.exit(1)
     else:
         tickers = args.tickers_pos or load_ticker_file("tickers.csv") or ["AAPL"]
     logger.info("Live-Modus: %d Ticker ueber Provider (%s)", len(tickers), ", ".join(sorted(providers)))
