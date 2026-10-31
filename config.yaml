@@ -190,7 +190,9 @@ sector_rules:
         - Insurance - Brokers
         - Capital Markets
         - Asset Management
-        - Financial Data & Stock Exchanges
+        # v39 (1): "Financial Data & Stock Exchanges" (CME, ICE, SPGI, MCO, ...)
+        # NICHT mehr financials -> Standardgruppe mit allen Standardkriterien
+        # (roic_avg5, fcf_*, net_debt_ebitda); Bank-Kriterien entfallen dafuer.
         - Diversified Financial Services
         - Mortgage Finance
     cyclicals:

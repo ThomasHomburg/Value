@@ -30,6 +30,7 @@ DCF je Startwert-Modus (Start-FCF, Wert je Aktie Bear/Base/Bull, MoS Base):
   ttm_only     30.55 Mrd.            48.17      58.69      89.67    -204.8%          n/a
   aktiver Modus (dcf.fcf_mode=auto): MoS Base -193.7%, MoS bei 10 % (robust) -239.5%
   Umsatz-CAGR (Basis-Wachstum): -6.7% | Diskontsatz 9.0% | Terminal Growth 2.5%
+  Szenario-Wachstum J. 1-5 (tatsaechlich): Bear -9.7%, Base -6.7%, Bull 0.0%
 
 EBIT, Steuersatz, NOPAT, Eigenkapital, ROIC je Jahr:
   FY      EBIT (Mrd.)   Steuer  NOPAT (Mrd.)    EK (Mrd.)     ROIC
@@ -84,6 +85,7 @@ DCF je Startwert-Modus (Start-FCF, Wert je Aktie Bear/Base/Bull, MoS Base):
   ttm_only      2.17 Mrd.             1.12       4.61      24.30    -665.3%          n/a
   aktiver Modus (dcf.fcf_mode=auto): MoS Base n/a, MoS bei 10 % (robust) n/a
   Umsatz-CAGR (Basis-Wachstum): -11.1% | Diskontsatz 9.0% | Terminal Growth 2.5%
+  Szenario-Wachstum J. 1-5 (tatsaechlich): Bear -14.1%, Base -11.1%, Bull 0.0%
 
 EBIT, Steuersatz, NOPAT, Eigenkapital, ROIC je Jahr:
   FY      EBIT (Mrd.)   Steuer  NOPAT (Mrd.)    EK (Mrd.)     ROIC

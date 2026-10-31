@@ -185,6 +185,8 @@ def main() -> None:
               f" {_pct(row['mos_robust'] if mode == dcf.fcf_mode else float('nan')):>12}")
         w(f"  aktiver Modus (dcf.fcf_mode={dcf.fcf_mode}): MoS Base {_pct(row['margin_of_safety'])}, MoS bei 10 % (robust) {_pct(row['mos_robust'])}")
         w(f"  Umsatz-CAGR (Basis-Wachstum): {_pct(dcf.revenue_cagr)} | Diskontsatz {_pct(dcf.discount_rate)} | Terminal Growth {_pct(dcf.terminal_growth)}")
+        # v39 (2): Szenario-Wachstumsraten J. 1-5 (tatsaechlich, aus DcfResult)
+        w(f"  Szenario-Wachstum J. 1-5 (tatsaechlich): {fmt_scenario_growth(dcf)}")
         w("")
         # --- EBIT / Steuersatz / NOPAT / EK / ROIC je Jahr ---
         w("EBIT, Steuersatz, NOPAT, Eigenkapital, ROIC je Jahr:")

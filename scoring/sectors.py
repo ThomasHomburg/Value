@@ -42,7 +42,8 @@ _FINANCIAL_INDUSTRIES = {
     "insurance - diversified", "insurance - reinsurance",
     "insurance - specialty", "insurance - brokers",
     "capital markets", "asset management", "asset management - global",
-    "financial data & stock exchanges", "diversified financial services",
+    # v39 (1): "financial data & stock exchanges" entfernt -> Standardgruppe
+    "diversified financial services",
     "mortgage finance", "shell companies",
 }
 # Branchen, die als Zykliker (Rohstoffe, Chemie, Stahl, Auto) gelten.
