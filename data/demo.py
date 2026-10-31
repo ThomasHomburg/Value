@@ -35,11 +35,11 @@ AAPL_BALANCE = [
 ]
 
 AAPL_CASHFLOW = [
-    {"date": "2021-09-25", "calendarYear": "2021", "reportedCurrency": "USD", "operatingCashFlow": 104038000000, "capitalExpenditure": -11085000000, "stockBasedCompensation": 8742000000},
-    {"date": "2022-09-24", "calendarYear": "2022", "reportedCurrency": "USD", "operatingCashFlow": 122502000000, "capitalExpenditure": -10708000000, "stockBasedCompensation": 9038000000},
-    {"date": "2023-09-30", "calendarYear": "2023", "reportedCurrency": "USD", "operatingCashFlow": 110543000000, "capitalExpenditure": -10959000000, "stockBasedCompensation": 10833000000},
-    {"date": "2024-09-28", "calendarYear": "2024", "reportedCurrency": "USD", "operatingCashFlow": 118254000000, "capitalExpenditure": -9447000000, "stockBasedCompensation": 10952000000},
-    {"date": "2025-09-27", "calendarYear": "2025", "reportedCurrency": "USD", "operatingCashFlow": 111482000000, "capitalExpenditure": -12715000000, "stockBasedCompensation": 11688000000},
+    {"date": "2021-09-25", "calendarYear": "2021", "reportedCurrency": "USD", "operatingCashFlow": 104038000000, "capitalExpenditure": -11085000000, "stockBasedCompensation": 8742000000, "depreciationAndAmortization": 11104000000},
+    {"date": "2022-09-24", "calendarYear": "2022", "reportedCurrency": "USD", "operatingCashFlow": 122502000000, "capitalExpenditure": -10708000000, "stockBasedCompensation": 9038000000, "depreciationAndAmortization": 11449000000},
+    {"date": "2023-09-30", "calendarYear": "2023", "reportedCurrency": "USD", "operatingCashFlow": 110543000000, "capitalExpenditure": -10959000000, "stockBasedCompensation": 10833000000, "depreciationAndAmortization": 10903000000},
+    {"date": "2024-09-28", "calendarYear": "2024", "reportedCurrency": "USD", "operatingCashFlow": 118254000000, "capitalExpenditure": -9447000000, "stockBasedCompensation": 10952000000, "depreciationAndAmortization": 10801000000},
+    {"date": "2025-09-27", "calendarYear": "2025", "reportedCurrency": "USD", "operatingCashFlow": 111482000000, "capitalExpenditure": -12715000000, "stockBasedCompensation": 11688000000, "depreciationAndAmortization": 11465000000},
 ]
 
 
@@ -58,7 +58,8 @@ def _synthetic(ticker: str, name: str, sector: str, country: str, mkt_cap: float
                         "totalStockholdersEquity": y["equity"], "netDebt": y["net_debt"]})
         cashflow.append({"date": f"{fy}-12-31", "calendarYear": str(fy), "reportedCurrency": "USD",
                          "operatingCashFlow": y["ocf"], "capitalExpenditure": y["capex"],
-                         "stockBasedCompensation": y.get("sbc", 0)})
+                         "stockBasedCompensation": y.get("sbc", 0),
+                         "depreciationAndAmortization": y.get("da", y["ebitda"] - y["ebit"])})
     profile = {"symbol": ticker, "companyName": name, "sector": sector,
                "country": country, "currency": "USD", "mktCap": mkt_cap}
     m = extract_metrics(ticker, income, balance, cashflow, profile)
@@ -92,13 +93,16 @@ def demo_companies() -> list[TickerMetrics]:
                      sbc=0.01 * rev)
     companies.append(_synthetic("LEVR", "Levered Corp", "Basic Materials", "US", 25e9, y))
 
-    # Wird ausgeschlossen: negatives Eigenkapital + sinkender Umsatz (Value-Trap)
+    # Wird ausgeschlossen: negativer Durchschnitts-FCF ueber 5 Jahre
+    # (filters.min_avg_fcf_5y_usd: 0; OCF < |Capex| -> FCF < 0).
+    # Das negative Eigenkapital schliesst seit v38 NICHT mehr aus
+    # (Flag "ek_negativ" stattdessen).
     y = {}
     for i, fy in enumerate(range(2021, 2026)):
         rev = 30e9 * (0.94 ** i)
         y[fy] = dict(revenue=rev, gross_profit=0.20 * rev, ebit=-0.05 * rev, ebitda=0.02 + rev,
                      net_income=-0.08 * rev, interest=1e9, tax=0.0, shares=0.5e9,
-                     equity=-5e9, net_debt=20e9, ocf=0.01 * rev, capex=0.02 * rev,
+                     equity=-5e9, net_debt=20e9, ocf=0.005 * rev, capex=-0.02 * rev,
                      sbc=0.005 * rev)
     companies.append(_synthetic("DIST", "Distressed Corp", "Consumer Cyclical", "US", 8e9, y))
 

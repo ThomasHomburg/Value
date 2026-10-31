@@ -82,10 +82,24 @@ def test_aapl_fcf_yield_sbc_plausible(aapl_metrics):
 
 
 def test_aapl_fcf_yield_sbc_nan_when_sbc_missing(aapl_metrics):
-    """Fehlende SBC -> fcf_sbc = NaN -> FCF-Yield SBC = NaN, nie 0."""
+    """v34/v35: Fehlende SBC in allen Jahren -> fcf_sbc = NaN -> FCF-Yield SBC = NaN
+    (nie 0, nie Roh-FCF); nie Kandidat. v35: Status 'Pruefen (SBC fehlt)' NUR,
+    wenn ohne SBC Quality >= 60 UND MoS >= 30 % -- AAPL (teuer, MoS < 30 %)
+    bekommt den normalen Status."""
+    from config import load_config
+    from scoring.pipeline import evaluate_ticker
     for fy in aapl_metrics.years:
         aapl_metrics.years[fy]["fcf_sbc"].value = float("nan")
     assert math.isnan(fcf_yield_sbc(aapl_metrics, 2024))
+    cfg = load_config()
+    cfg["sec"] = {"enabled": False}
+    out = evaluate_ticker(aapl_metrics, cfg)
+    row = out["row"]
+    assert row["is_buy"] is False
+    assert "SBC n/a (ohne SBC)" in row["flags"]
+    # v35: AAPL ohne SBC hat MoS < 30 % -> normaler Status, kein Pruefstatus
+    assert row["status"] != "Kandidat"
+    assert row["status_pruefen_sbc"] is (row["status"] == "Prüfen (SBC fehlt)")
 
 
 def test_aapl_criterion_fcf_yield_sbc_avg3(aapl_metrics, cfg):
@@ -123,7 +137,11 @@ def test_aapl_roe(aapl_metrics):
 def test_aapl_net_debt_ebitda_negative(aapl_metrics):
     nd = aapl_metrics.years[2024]["net_debt"].value
     eb = aapl_metrics.years[2024]["ebitda"].value
-    assert nd / eb == pytest.approx(-37591000000 / 134661000000)
+    # v29: EBITDA = EBIT + D&A aus dem Cashflow-Statement (nicht das Yahoo-Feld)
+    ebit = aapl_metrics.years[2024]["ebit"].value
+    da = aapl_metrics.years[2024]["depreciation_amortization"].value
+    assert eb == pytest.approx(ebit + da)
+    assert nd / eb == pytest.approx(-37591000000 / (123216000000 + 10801000000))
 
 
 def test_aapl_interest_coverage_high(aapl_metrics):

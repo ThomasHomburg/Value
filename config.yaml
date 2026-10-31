@@ -10,6 +10,12 @@
 #     sind absolute USD (nicht Mio.). Ratios sind dimensionslos.
 
 data:
+  # ROIC: effektiver Steuersatz wird auf tax_rate_min..tax_rate_max begrenzt;
+  # ausserhalb (oder bei Vorsteuerverlust) gilt der Normsteuersatz tax_rate_norm.
+  # Bei EBIT <= 0 ist NOPAT = EBIT (kein Steuervorteil im Verlustjahr).
+  tax_rate_min: 0.0           # effektiver Steuersatz < 0 %  -> Normsteuersatz
+  tax_rate_max: 0.35          # effektiver Steuersatz > 35 % -> Normsteuersatz
+  tax_rate_norm: 0.21         # Normsteuersatz (US-Koerperschaftsteuer)
   years: 5                    # Historienfenster: 5 Jahre pro Unternehmen
   thin_years: 5               # Kriterium mit weniger Jahren Daten -> "Daten duenn"
   min_points_5y: 3            # Mindestanzahl Datenpunkte fuer 5-Jahres-Kennzahlen
@@ -37,9 +43,17 @@ providers:
 filters:
   # Harte Ausschlussfilter (vor dem Scoring). Betraege in absoluten USD.
   min_market_cap_usd: 500000000     # Marktkapitalisierung < 500 Mio. USD
-  min_history_years: 5              # weniger als 5 Jahre Datenhistorie
+  # v38 (1): Schalter fuer das alte Verhalten "Eigenkapital negativ -> Ausschluss".
+  # false (Default): negativer EK schliesst NICHT aus; Ticker wird normal bewertet
+  # mit Flag "ek_negativ" (roe_avg5 n/a in EK<=0-Jahren, ROIC nutzt EK+ND als Nenner).
+  exclusion:
+    negative_equity: false          # true stellt den alten Ausschluss wieder her
+  # v29: Jahre mit tatsaechlichen Werten (nicht Spalten): ein Jahr zaehlt nur,
+  # wenn mindestens eine Kernkennzahl (revenue/ebit/net_income/ocf/equity)
+  # einen Wert ungleich NaN hat. Leere Spalten zaehlen nicht.
+  min_history_years: 4              # weniger als 4 Jahre mit Werten -> Ausschluss
   min_avg_fcf_5y_usd: 0             # Ø-FCF ueber 5 Jahre > 0 (negativ)
-  min_equity_usd: 0                 # Eigenkapital < 0 (negativ)
+  min_equity_usd: 0                 # nur aktiv, wenn exclusion.negative_equity: true
   min_revenue_cagr_5y: -0.03        # Umsatz-CAGR 5 J. < -3 % (Value-Trap-Filter)
   # Hinweis: min_avg_fcf_5y_usd und min_equity_usd vergleichen Statement-Werte
   # (reportedCurrency) mit USD-Schwellen; fuer Nicht-USD-Ticker siehe FX-Modul.
@@ -122,6 +136,144 @@ criteria:
     full: 0.60
     zero: 1.20
 
+  # v28: Sektor-Kriterien (Schritt 7, Industry-basiert, siehe sector_rules).
+  # Banken/Versicherer: ROE, P/B, Dividendenrendite statt ROIC/FCF/ND/EBITDA.
+  # Zykliker: normalisierter Gewinn (7-J.-Normalisierung). REITs: FFO-Yield.
+  roe_avg5_financials:
+    block: profitability
+    weight: 0.25
+    direction: higher
+    full: 0.20
+    zero: 0.08
+  price_to_book:
+    block: stability
+    weight: 0.10
+    direction: lower
+    full: 1.0
+    zero: 3.0
+  dividend_yield:
+    block: cashflow
+    weight: 0.10
+    direction: higher
+    full: 0.05
+    zero: 0.01
+  normalized_earnings:
+    block: profitability
+    weight: 0.15
+    direction: higher
+    full: 15.0
+    zero: 3.0
+  ffo_yield:
+    block: valuation
+    weight: 0.30
+    direction: higher
+    full: 0.10
+    zero: 0.03
+
+sector_rules:
+  # v28 (Schritt 7): Sektorregeln ueber das Feld INDUSTRY, nicht Sector
+  # (PYPL, Visa, Mastercard laufen als 'Financial Services', sind aber
+  # keine Banken).
+  groups:
+    financials:
+      # Banken & Versicherer: ROE, P/B, Dividendenrendite statt
+      # ROIC, FCF, ND/EBITDA.
+      industries:
+        - Banks - Diversified
+        - Banks - Regional
+        - Banks - Money Center
+        - Insurance - Property & Casualty
+        - Insurance - Life
+        - Insurance - Diversified
+        - Insurance - Reinsurance
+        - Insurance - Specialty
+        - Insurance - Brokers
+        - Capital Markets
+        - Asset Management
+        # v39 (1): "Financial Data & Stock Exchanges" (CME, ICE, SPGI, MCO, ...)
+        # NICHT mehr financials -> Standardgruppe mit allen Standardkriterien
+        # (roic_avg5, fcf_*, net_debt_ebitda); Bank-Kriterien entfallen dafuer.
+        - Diversified Financial Services
+        - Mortgage Finance
+    cyclicals:
+      # Zykliker (Rohstoffe, Chemie, Stahl, Auto): Gewinne ueber bis zu
+      # N Jahre normalisieren, soweit Daten reichen, sonst Flag.
+      normalize_years: 7
+      industries:
+        - Gold
+        - Silver
+        - Copper
+        - Aluminum
+        - Steel
+        - Coal
+        - Uranium
+        - Other Industrial Metals & Mining
+        - Other Precious Metals & Mining
+        - Chemicals
+        - Specialty Chemicals
+        - Agricultural Inputs
+        - Auto Manufacturers
+        - Auto Parts
+        - Auto & Truck Dealerships
+        - Trucking
+        - Railroads
+        - Oil & Gas Integrated
+        - Oil & Gas E&P
+        - Oil & Gas Refining & Marketing
+        - Oil & Gas Midstream
+        - Oil & Gas Equipment & Services
+        - Building Products & Equipment
+        - Construction Materials
+        - Residential Construction
+        - Home Improvement Retail
+        - Department Stores
+        - Discount Stores
+        - Apparel Retail
+        - Specialty Retail
+        - Restaurants
+        - Resorts & Casinos
+        - Lodging
+        - Travel Services
+        - Airlines
+        - Aerospace & Defense
+        - Metal Fabrication
+        - Steel & Iron
+        - Lumber & Wood Production
+        - Paper & Paper Products
+        - Packaging & Containers
+        - Industrial Gases
+        - Integrated Freight & Logistics
+        - Marine Shipping
+        - Airports & Air Services
+        - Electrical Equipment & Parts
+        - Specialty Industrial Machinery
+        - Industrial Distribution
+        - Farm & Heavy Construction Machinery
+        - Luxury Goods
+        - Internet Retail
+        - Recreational Vehicles
+        - Entertainment
+        - Advertising Agencies
+        - Rental & Leasing Services
+    reits:
+      # REITs: FFO-Hinweis statt FCF-Yield (FFO je Aktie ist massgeblich).
+      industries: []   # Erkennung ueber Industry-Praefix 'REIT - ...'
+    special:
+      # v35: Industry-Gruppen mit SONDERREGEL -- DCF und FCF-Yield werden
+      # NICHT berechnet (MoS-Zellen "n/a (Sonderregel)", Status
+      # "Sonderregel noetig"). Pattern per fnmatch auf das Industry-Feld:
+      #   Banken (Banks - *, Capital Markets), Versicherer (Insurance - *),
+      #   REITs (REIT - *), Versorger (Utilities - *).
+      # PYPL/V/MA (Credit Services) sind NICHT dabei -> Normalmodell.
+      industry_patterns:
+        - "Banks - *"
+        - "Capital Markets"
+        - "Insurance - *"
+        - "REIT - *"
+        - "Utilities - *"
+        - "Asset Management"        # v38 (3): Asset Manager + Custody-Banken (NTRS, STT, AMP, BLK, BX, KKR)
+        # NICHT dabei: "Financial Data & Stock Exchanges" (CME, ICE, SPGI, MCO, ...) -> Normalmodell
+
 score_groups:
   # Quality-Score und Value-Score werden getrennt berechnet (gewichtete Summe
   # der Block-Scores je Gruppe, renormalisiert auf die verfuegbaren Bloecke).
@@ -131,6 +283,12 @@ score_groups:
   weights:
     quality: 0.75
     value: 0.25
+  # v33: Value-Score wird als "n/a" angezeigt, wenn die Datenabdeckung darunter
+  # liegt (zu wenige bewertete Kriterien -> Value-Aussage nicht belastbar)
+  min_coverage_value: 0.70
+  # v35: Quality-Score wird als "n/a" angezeigt, wenn die Datenabdeckung
+  # darunter liegt (z. B. Sektor-Sonderregel: nicht anwendbare Kriterien n/a)
+  min_coverage_quality: 0.70
 
 sanity:
   # Plausibilitaetsgrenzen [min, max] fuer den Sanity-Check (Log-Markierung).
@@ -160,10 +318,73 @@ dcf:
   base_growth_cap: 0.06
   bull_growth_multiplier: 1.3
   bull_growth_cap: 0.10
+  # v37 (1): Szenario-Wachstum bei CAGR < 0 (schrumpfendes Unternehmen):
+  #   Base = CAGR (negativ, unbegrenzt), Bear = CAGR - bear_negative_spread,
+  #   Bull = 0 % (keine Erholung). Bei CAGR >= 0 unveraendert:
+  #   Bear 0 %, Base = min(CAGR, base_growth_cap), Bull = min(CAGR*mult, bull_growth_cap).
+  bear_negative_spread: 0.03  # 3 Prozentpunkte unter Base bei CAGR < 0
   fade_to_growth: 0.025
   fcf_avg_years: 3
   fcf_mode: auto              # DCF-Startwert: auto (TTM falls plausibel, sonst O3J)
-                              # | avg3 (O letzte 3 GJ) | latest (juengstes GJ) | ttm
+                              # | avg3 (O letzte 3 GJ) | latest (juengstes GJ)
+                              # | ttm (TTM O: TTM + 2 nicht ueberlappende GJ)
+                              # | ttm_only (reiner TTM-Start, ohne O)
+  net_debt_mode: reported     # Nettoverschuldung: reported (gemeldet) |
+                              # incl_sti (Schulden - (Cash + kurzfr. Anlagen))
+  mos_min_mode: min           # Kandidatenregel MoS: min (Minimum der 4 Startwert-MoS)
+                              # | avg3 | latest | ttm | ttm_only | auto (wie fcf_mode)
+  # v30: welche Modi die Kandidatenregel nutzt (Status-Spalten nebeneinander):
+  #   min_all     = Minimum aus allen 4 Modi (O3J, juengstes GJ, TTM O, TTM) -- Default
+  #   min_recent2 = Minimum aus den juengsten 2 Modi (juengstes GJ + TTM rein)
+  candidate_mode: min_all
+  # v36 (4): Robustheits-MoS -- Base-Szenario mit erhoehtem Diskontsatz
+  # (Default 10 %) im aktiven Startwert-Modus; Spalte "MoS bei 10 %" und
+  # Status-Zusatz "robust", wenn dort >= buy_margin_of_safety_min.
+  robust_discount_rate: 0.10
   buy_quality_min: 60         # Kaufkandidat: Quality-Score >= 60 (statt Gesamtscore)
   buy_margin_of_safety_min: 0.30
   buy_bear_floor: 0.80
+  watch_margin_of_safety_min: 0.30  # Beobachtungsliste: bester Modus >= 30 %,
+                                    # obwohl das Minimum < 30 % (Quality >= 60)
+
+sec:
+  # SEC-EDGAR-Abgleich (kostenlos, data.sec.gov). User-Agent MIT E-Mail als
+  # Platzhalter -- vor Produktivbetrieb eigene E-Mail eintragen (SEC-Policy).
+  user_agent: "Value-Screener research@example.com"
+  enabled: true               # false = Abgleich deaktivieren
+  tolerance: 0.05             # Flag "Quellen weichen ab" ab > 5 % Abweichung je Jahr
+  max_requests_per_second: 5  # v32: Rate-Limit gegen data.sec.gov (SEC-Policy: max. 10/s,
+                              # wir bleiben bei 5/s; Mindestabstand 1/5 s zwischen Requests)
+  # v36 (2): Capex-Definitionspruefung -- weicht Capex laut SEC in mind. N Jahren
+  # um mehr als `tolerance` ab -> Status "Pruefen (Capex-Definition)", nie Kandidat.
+  capex_check:
+    # v37 (3): Pruefstatus, wenn |Yahoo-Capex - SEC-Capex| in mind. min_years
+    # Jahren mehr als `ocf_share` des OCF betraegt (nicht mehr rel. Abweichung).
+    ocf_share: 0.10           # Differenz > 10 % des OCF je Jahr
+    min_years: 2              # in mind. 2 betroffenen Jahren -> Pruefstatus
+
+# v40 (2): Captive-Finance-Ticker -- Nettoverschuldung enthaelt den
+# Finanzierungsarm (Industrial/Equipment Operations nicht trennbar in den
+# verfuegbaren Daten, siehe CLAUDE.md v39 Machbarkeitsbericht) -> Flag
+# "captive_finance", Status "Pruefen (Captive Finance)", nie Kandidat.
+captive_finance:
+  tickers: [DE, CAT, PCAR, GM, F]
+
+consistency:
+  # v36 (5): Bilanz-Konsistenz -- Flag "ND != Schulden - Cash", wenn die gemeldete
+  # Nettoverschuldung um mehr als `net_debt_mcap_share` der Marktkapitalisierung
+  # von (Total Debt - Cash) abweicht (neuestes Jahr mit allen drei Werten).
+  net_debt_mcap_share: 0.05   # 5 % der Marktkapitalisierung
+
+universe:
+  # v28 (Schritt 8): Universumslader.
+  # sp500: Liste von der Wikipedia-Tabelle (pandas.read_html), wird als
+  #        tickers_sp500.csv gespeichert und von dort geladen.
+  # stoxx600: Import per CSV (tickers_stoxx600.csv, Spalte 'ticker').
+  sp500_wikipedia_url: "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+  sp500_csv: "tickers_sp500.csv"
+  stoxx600_csv: "tickers_stoxx600.csv"
+  batch_size: 20              # Abruf in Batches (z. B. 20 Ticker)
+  batch_pause_seconds: 2.0    # Pause zwischen Batches (yfinance-Rate-Limit)
+  resume: true                # Wiederaufnahme nach Abbruch (Cache-Datei)
+  cache_file: ".universe_cache.json"  # Fortschritt je Ticker (OK/Fehler)

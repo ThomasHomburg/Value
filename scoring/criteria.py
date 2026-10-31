@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from data.loader import TickerMetrics
 from data.metrics import fcf_yield_sbc, roic, roe
+from scoring.sectors import sector_rule, normalized_net_income, price_to_book, dividend_yield
 
 
 @dataclass
@@ -30,6 +31,24 @@ class CriterionResult:
 
 
 Calc = Callable[[TickerMetrics, dict, Any], CriterionResult]
+
+
+def _rule(m: TickerMetrics, cfg) -> object:
+    """Sektorregel (Industry-basiert) je Ticker; gecacht auf dem Objekt selbst
+    (id()-basierter Cache ist unsicher: id() wird nach Garbage Collection neu
+    vergeben und wuerde falsche Regeln liefern)."""
+    cached = m.__dict__.get("_sector_rule_cache")
+    if cached is None:
+        cached = sector_rule(m, cfg)
+        m.__dict__["_sector_rule_cache"] = cached
+    return cached
+
+
+def _special(m: TickerMetrics, cfg) -> bool:
+    """v35: Sonderregel-Gruppe (Banken/Versicherer/REITs/Versorger als
+    Industry-Pattern) -- DCF und FCF-Yield werden nicht berechnet; die
+    betroffenen Kriterien sind n/a."""
+    return _rule(m, cfg).group == "special"
 
 
 def _values(metrics: TickerMetrics, name: str) -> list[tuple[int, float]]:
@@ -85,6 +104,12 @@ def _result(value: float, is_na: bool, years_available: int, thin_years: int) ->
 
 def calc_roic_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
+    # v28: Banken/Versicherer nutzen ROE statt ROIC
+    if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel (Banken/Versicherer/REITs/Versorger) -> ROIC n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "ebit")
     vals = [roic(m, fy) for fy, _ in _values(m, "ebit")]
     vals = [v for v in vals if v == v]
@@ -96,8 +121,11 @@ def calc_roic_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
 def calc_roe_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
     years = _year_count(m, "net_income")
+    # v38 (1): Jahre mit Eigenkapital <= 0 liefern roe()=NaN -> werden nicht als
+    # verfuegbar gezaehlt (n/a statt 0 Punkte); EK<=0-Jahre zaehlen nicht zu `years`.
     vals = [roe(m, fy) for fy, _ in _values(m, "net_income")]
     vals = [v for v in vals if v == v]
+    years = min(years, len(vals)) if vals else years
     if len(vals) < cfg["min_points_5y"]:
         return _result(float("nan"), True, years, thin)
     return _result(_avg(vals[-5:]), False, years, thin)
@@ -105,6 +133,15 @@ def calc_roe_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
 
 def calc_net_debt_ebitda(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
+    # v28: Banken/Versicherer nutzen P/B statt ND/EBITDA
+    if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> ND/EBITDA n/a (DCF/FCF nicht berechnet)
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
+    # v29: EBITDA unplausibel (EBITDA < EBIT) -> ND/EBITDA als n/a
+    if getattr(m, "ebitda_unplausible", False):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "net_debt", "ebitda")
     nd = [v for _, v in _values(m, "net_debt")]
     eb = [v for _, v in _values(m, "ebitda")]
@@ -129,8 +166,14 @@ def calc_fcf_positive_years(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     Weniger als 10 verfuegbare Jahre werden nicht gegen 10 bewertet, sondern
     gegen die tatsaechliche Anzahl (z. B. 4/4 -> 100 %). Anzeige als "4 / 4".
     Volle Punkte bei 100 %, null Punkte bei <= 50 % (Schwellen in config.yaml).
+    v28: Banken/Versicherer nutzen Dividendenrendite statt FCF.
     """
     thin = cfg["thin_years"]
+    if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> FCF-Kriterien n/a (FCF-Yield nicht berechnet)
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "fcf")
     vals = [v for _, v in _values(m, "fcf")]
     if len(vals) < cfg["fcf_pos_min_years"]:
@@ -143,6 +186,12 @@ def calc_fcf_positive_years(m: TickerMetrics, cfg, _fx) -> CriterionResult:
 
 def calc_fcf_margin_avg5(m: TickerMetrics, cfg, _fx) -> CriterionResult:
     thin = cfg["thin_years"]
+    # v28: Banken/Versicherer nutzen Dividendenrendite statt FCF-Marge
+    if _rule(m, cfg).group == "financials":
+        return _result(float("nan"), True, 0, thin)
+    # v35: Sonderregel -> FCF-Marge n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, 0, thin)
     years = _year_count(m, "fcf", "revenue")
     fcf = dict(_values(m, "fcf"))
     rev = dict(_values(m, "revenue"))
@@ -194,6 +243,12 @@ def calc_fcf_yield_sbc_avg3(m: TickerMetrics, cfg, fx) -> CriterionResult:
     years = _year_count(m, "fcf_sbc")
     if m.market_cap is None or m.market_cap.is_na():
         return _result(float("nan"), True, years, thin)
+    # v35: Sonderregel -> FCF-Yield wird nicht berechnet -> n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, years, thin)
+    # v28: REITs nutzen FFO-Yield statt FCF-Yield (FFO ist massgeblich)
+    if _rule(m, cfg).group == "reits":
+        return calc_ffo_yield(m, cfg, fx)
     fcf = _values(m, "fcf_sbc")
     yields = []
     for fy, v in fcf[-3:]:
@@ -213,6 +268,9 @@ def calc_mos_base(m: TickerMetrics, cfg, fx) -> CriterionResult:
     """
     from valuation.dcf import compute_dcf
     thin = cfg["thin_years"]
+    # v35: Sonderregel -> DCF wird nicht berechnet -> MoS n/a
+    if _special(m, cfg):
+        return _result(float("nan"), True, len(m.years), thin)
     dcf = compute_dcf(m, {"dcf": _dcf_cfg_for_criteria()}, fx=fx)
     mos = dcf.margin_of_safety
     years = len(m.years)
@@ -270,6 +328,71 @@ def calc_ev_ebit_vs_median(m: TickerMetrics, cfg, fx) -> CriterionResult:
     return _result(current / median, False, years, thin)
 
 
+# --- v28: Sektor-Kriterien (Banken/Versicherer: ROE, P/B, Dividendenrendite;
+# Zykliker: normalisierter Gewinn; REITs: FFO-Hinweis) -----------------------
+
+def calc_roe_avg5_financials(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Banken/Versicherer: ROE statt ROIC (ROE ist bei Banken aussagekraeftiger)."""
+    return calc_roe_avg5(m, cfg, _fx)
+
+
+def calc_price_to_book(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Banken/Versicherer: P/B (Kurs / Buchwert je Aktie) statt ND/EBITDA."""
+    thin = cfg["thin_years"]
+    pkb = price_to_book(m)
+    years = _year_count(m, "equity")
+    if pkb != pkb:
+        return _result(float("nan"), True, years, thin)
+    return _result(pkb, False, years, thin)
+
+
+def calc_dividend_yield(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Banken/Versicherer: Dividendenrendite (Dezimal)."""
+    thin = cfg["thin_years"]
+    dy = dividend_yield(m)
+    years = _year_count(m, "net_income")
+    if dy != dy:
+        return _result(float("nan"), True, years, thin)
+    return _result(dy, False, years, thin)
+
+
+def calc_normalized_earnings(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """Zykliker: Nettogewinn ueber bis zu 7 Jahre normalisiert (Ø je Aktie).
+
+    Gewinne ueber die verfuegbaren Jahre (max. `sector_rules.groups.cyclicals.
+    normalize_years`, Default 7) gleitend gemittelt; reicht die Historie nicht,
+    wird mit weniger Jahren gerechnet und das Kriterium als 'Daten duenn'
+    markiert (Flag).
+    """
+    thin = cfg["thin_years"]
+    rule = _rule(m, cfg)
+    norm_ni, years_used = normalized_net_income(m, rule)
+    shares = m.latest("shares_diluted")
+    per_share = norm_ni / shares.value if (norm_ni == norm_ni and shares is not None
+                                         and not shares.is_na() and shares.value) else float("nan")
+    want = max(1, rule.normalized_earnings_years)
+    is_thin = years_used < want  # Historie reicht nicht -> Flag
+    res = _result(per_share, per_share != per_share, years_used, thin)
+    res.thin = is_thin
+    return res
+
+
+def calc_ffo_yield(m: TickerMetrics, cfg, _fx) -> CriterionResult:
+    """REITs: FFO-Hinweis statt FCF-Yield (FFO je Aktie / Kurs; NaN wenn kein FFO)."""
+    from scoring.sectors import ffo_per_share
+    thin = cfg["thin_years"]
+    ffo = ffo_per_share(m)
+    years = _year_count(m, "fcf")
+    if ffo != ffo or m.market_cap is None or m.market_cap.is_na() or m.market_cap.value <= 0:
+        return _result(float("nan"), True, years, thin)
+    shares = m.latest("shares_diluted")
+    if shares is None or shares.is_na() or shares.value <= 0:
+        return _result(float("nan"), True, years, thin)
+    price = m.market_cap.value / shares.value
+    return _result(ffo / price if price else float("nan"), False, years, thin)
+
+
+# v28: Standard-Kriterien (alle Sektorgruppen)
 CRITERIA: dict[str, Calc] = {
     "roic_avg5": calc_roic_avg5,
     "roe_avg5": calc_roe_avg5,
@@ -284,6 +407,41 @@ CRITERIA: dict[str, Calc] = {
     "ev_ebit_vs_median": calc_ev_ebit_vs_median,
 }
 
+# v28: Sektor-spezifische Kriterien (werden je Gruppe in active_criteria aktiv)
+SECTOR_CRITERIA: dict[str, Calc] = {
+    "roe_avg5_financials": calc_roe_avg5_financials,   # Banken/Versicherer
+    "price_to_book": calc_price_to_book,               # Banken/Versicherer
+    "dividend_yield": calc_dividend_yield,             # Banken/Versicherer
+    "normalized_earnings": calc_normalized_earnings,   # Zykliker (7-J.-Norm.)
+    "ffo_yield": calc_ffo_yield,                       # REITs (FFO-Hinweis)
+}
+
+
+def active_criteria(m: TickerMetrics, cfg: dict) -> dict[str, Calc]:
+    """v28: aktive Kriterien je Sektorgruppe.
+
+    Banken/Versicherer: ROE, P/B, Dividendenrendite statt ROIC, FCF, ND/EBITDA
+    (diese werden in den Calc-Funktionen per Sektorregel als n/a geliefert;
+    zusaetzlich die Finanz-Kriterien aktivieren).
+    Zykliker: zusaeztlich normalisierter Gewinn (7-Jahres-Normalisierung).
+    REITs: zusaeztlich FFO-Yield (statt FCF-Yield, siehe calc_fcf_yield_sbc_avg3).
+    """
+    from scoring.sectors import sector_rule
+    group = sector_rule(m, cfg).group
+    crits = dict(CRITERIA)
+    # v35: Sonderregel-Gruppe -> nur Standard-Kriterien; die nicht anwendbaren
+    # (ROIC, ND/EBITDA, FCF-*, FCF-Yield, MoS) liefern n/a (siehe Calc-Funktionen)
+    if group == "special":
+        return crits
+    if group == "financials":
+        for name in ("roe_avg5_financials", "price_to_book", "dividend_yield"):
+            crits[name] = SECTOR_CRITERIA[name]
+    elif group == "cyclicals":
+        crits["normalized_earnings"] = SECTOR_CRITERIA["normalized_earnings"]
+    elif group == "reits":
+        crits["ffo_yield"] = SECTOR_CRITERIA["ffo_yield"]
+    return crits
+
 
 def compute_criteria(m: TickerMetrics, cfg: dict, fx=None) -> dict[str, CriterionResult]:
     data_cfg = cfg.get("data", {})
@@ -295,5 +453,8 @@ def compute_criteria(m: TickerMetrics, cfg: dict, fx=None) -> dict[str, Criterio
         "cagr_min_points": data_cfg.get("cagr_min_points", 4),
         "fcf_pos_min_years": data_cfg.get("fcf_pos_min_years", 4),
         "trend_min_points": data_cfg.get("trend_min_points", 4),
+        # v28: Sektorregeln (Industry) an die Calc-Funktionen durchreichen
+        "sector_rules": cfg.get("sector_rules", {}),
     }
-    return {name: calc(m, calc_cfg, fx) for name, calc in CRITERIA.items()}
+    crits = active_criteria(m, cfg)
+    return {name: calc(m, calc_cfg, fx) for name, calc in crits.items()}
