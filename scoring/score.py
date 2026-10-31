@@ -70,11 +70,16 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
         "total": float("nan"), "blocks": {}, "block_flags": {}, "details": {},
         "thin_criteria": [], "quality": float("nan"), "value": float("nan"),
         "coverage": float("nan"),
+        "quality_coverage": float("nan"),  # v37 (2): Abdeckung NUR der Quality-Bloecke
     }
     blocks: dict[str, list[tuple[float, float, bool]]] = {}
 
     total_weight = 0.0
     covered_weight = 0.0
+    # v37 (2): Quality-Abdeckung separat -- nur Kriterien der Quality-Bloecke
+    q_blocks = set((groups_cfg or {}).get("quality_blocks", []))
+    q_total_weight = 0.0
+    q_covered_weight = 0.0
 
     for name, crit in criteria_values.items():
         cfg = criteria_cfg[name]
@@ -85,6 +90,10 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
         blocks.setdefault(block, []).append((weight, pts, crit.is_na))
         if not crit.is_na and pts == pts:
             covered_weight += weight
+        if block in q_blocks:
+            q_total_weight += weight
+            if not crit.is_na and pts == pts:
+                q_covered_weight += weight
         if crit.thin:
             result["thin_criteria"].append(name)
         result["details"][name] = {
@@ -94,6 +103,8 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
 
     # Datenabdeckung = Anteil bewerteter Gewichte
     result["coverage"] = _r1(covered_weight / total_weight) if total_weight else float("nan")
+    # v37 (2): Quality-Abdeckung nur ueber Quality-Bloecke (Value-Luecken zaehlen nicht)
+    result["quality_coverage"] = _r1(q_covered_weight / q_total_weight) if q_total_weight else float("nan")
 
     # Block-Scores (renormalisiert auf nicht-n/a Kriterien je Block)
     block_scores: dict[str, float] = {}
@@ -116,6 +127,20 @@ def score_ticker(criteria_values: dict[str, CriterionResult], criteria_cfg: dict
                      if b in block_scores and block_scores[b] == block_scores[b]]
         result["quality"] = _r1(_weighted_mean(q_entries))
         result["value"] = _r1(_weighted_mean(v_entries))
+        # v33: Value als n/a, wenn Datenabdeckung < score_groups.min_coverage_value
+        min_cov = 0.70
+        if groups_cfg:
+            min_cov = float(groups_cfg.get("min_coverage_value", 0.70))
+        if (result["coverage"] == result["coverage"] and result["coverage"] < min_cov):
+            result["value"] = float("nan")
+        # v37 (2): Quality n/a nur, wenn die QUALITY-Abdeckung (nur Quality-Bloecke)
+        # < min_coverage_quality -- Value-Luecken beeinflussen Quality nicht mehr
+        min_cov_q = 0.70
+        if groups_cfg:
+            min_cov_q = float(groups_cfg.get("min_coverage_quality", 0.70))
+        qc = result["quality_coverage"]
+        if (qc == qc and qc < min_cov_q):
+            result["quality"] = float("nan")
 
         # Gesamtscore aus Gruppen, renormalisiert falls eine Gruppe n/a
         g_entries = []

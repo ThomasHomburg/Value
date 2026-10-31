@@ -56,7 +56,14 @@ class DcfResult:
     net_debt: float = float("nan")   # Nettoverschuldung OHNE Kundengelder (Berichtsw., aktuell)
     net_debt_source: str = ""        # "net_debt (gemeldet, exkl. Kundengelder)" | "total_debt - cash" | "n/a"
     customer_deposits: float = float("nan")  # Kundengelder (z. B. PYPL), in Cash enthalten
-    fcf_mode: str = "auto"           # Startwert-Modus: "auto" | "avg3" | "latest" | "ttm"
+    fcf_mode: str = "auto"           # Startwert-Modus: "auto" | "avg3" | "latest" | "ttm" | "ttm_only"
+    sbc_missing: bool = False        # v33: True wenn kein FCF-SBC verfuegbar -> Roh-FCF ohne SBC verwendet
+    fcf_le0: bool = False            # v33: True wenn Start-FCF <= 0 (MoS n/a, Anzeige "Start-FCF <= 0")
+    net_debt_mode: str = "reported"  # "reported" (gemeldet) | "incl_sti" (Schulden − (Cash+kurzfr.Anl.))
+    net_debt_alt: float = float("nan")  # alternative Nettoverschuldung (anderer Modus, Berichtsw.)
+    net_debt_alt_source: str = ""    # Quelle der alternativen Nettoverschuldung
+    mos_base_alt: float = float("nan")   # MoS (Base) mit alternativer Nettoverschuldung
+    scenario_growth: dict = field(default_factory=dict)  # v37 (1): {"bear": g5, "base": g5, "bull": g5}
 
 
 def _cagr(values: list[float]) -> float:
@@ -131,6 +138,11 @@ def _ttm_fcf_start(m: TickerMetrics) -> dict | None:
             or getattr(m, "ttm_fallback", False)):
         return None
     ttm_fcf = ttm.ttm.get("fcf_sbc")
+    sbc_missing = False
+    if ttm_fcf is None or ttm_fcf.is_na():
+        # v33: TTM ohne SBC -> Fallback auf Roh-FCF TTM
+        ttm_fcf = ttm.ttm.get("fcf")
+        sbc_missing = True
     if ttm_fcf is None or ttm_fcf.is_na():
         return None
     ttm_end = ttm.quarter_end  # ISO-Stichtag letztes Quartal
@@ -148,30 +160,80 @@ def _ttm_fcf_start(m: TickerMetrics) -> dict | None:
             continue
         if _date.fromisoformat(fe) < window_start:
             prior_fys.append(fy)
-    fy_vals = []
+    # v33: Vorjahres-GJ ebenfalls auf Roh-FCF fallbacken, wenn deren fcf_sbc fehlt
+    fy_vals_fb = []
     for fy in prior_fys[:2]:
         met = m.years[fy].get("fcf_sbc")
+        if met is None or met.is_na():
+            met = m.years[fy].get("fcf")
+            sbc_missing = True
         if met is not None and not met.is_na():
-            fy_vals.append((fy, met.value, met.currency))
-    if len(fy_vals) < 2:
+            fy_vals_fb.append((fy, met.value, met.currency))
+    if len(fy_vals_fb) < 2:
         return None  # nicht genug nicht-ueberlappende GJ
-    vals = [ttm_fcf.value] + [v for _, v, _ in fy_vals]
+    vals = [ttm_fcf.value] + [v for _, v, _ in fy_vals_fb]
     return {
         "fcf": sum(vals) / len(vals),
         "years_used": len(vals),
         "quarter_end": ttm_end,
         "sources": ([("TTM", ttm_fcf.value, ttm_fcf.currency)]
-                    + [(f"FY{fy}", v, c) for fy, v, c in fy_vals]),
+                    + [(f"FY{fy}", v, c) for fy, v, c in fy_vals_fb]),
         "currency": ttm_fcf.currency,
+        "sbc_missing": sbc_missing or None,
     }
 
 
+def _ttm_only_fcf_start(m: TickerMetrics) -> dict | None:
+    """v27: Reiner TTM-Start-FCF nach SBC (ohne Ø ueber mehrere Perioden).
+
+    Wie _ttm_fcf_start, aber nur das TTM-Fenster (Summe der letzten 4
+    Quartale) -- keine Hinzunahme davor liegender Geschaeftsjahre.
+    Rueckgabe: None wenn TTM nicht verwendbar (kein TTM, unplausibel,
+    Fallback aktiv), sonst dict mit fcf / years_used=1 / quarter_end /
+    sources / currency.
+    """
+    ttm = getattr(m, "ttm", None)
+    if (ttm is None or not getattr(m, "ttm_plausible", True)
+            or getattr(m, "ttm_fallback", False)):
+        return None
+    ttm_fcf = ttm.ttm.get("fcf_sbc")
+    sbc_missing = False
+    if ttm_fcf is None or ttm_fcf.is_na():
+        # v33: TTM ohne SBC -> Fallback auf Roh-FCF TTM
+        ttm_fcf = ttm.ttm.get("fcf")
+        sbc_missing = True
+    if ttm_fcf is None or ttm_fcf.is_na():
+        return None
+    out = {
+        "fcf": ttm_fcf.value,
+        "years_used": 1,
+        "quarter_end": ttm.quarter_end,
+        "sources": [("TTM", ttm_fcf.value, ttm_fcf.currency)],
+        "currency": ttm_fcf.currency,
+    }
+    if sbc_missing:
+        out["sbc_missing"] = True
+    return out
+
+
 def _avg_fcf_start(m: TickerMetrics, n: int) -> dict | None:
-    """Ø FCF-SBC der letzten n Geschaeftsjahre mit Daten (chronologisch)."""
+    """Ø FCF-SBC der letzten n Geschaeftsjahre mit Daten (chronologisch). v33: Fallback auf Roh-FCF ohne SBC."""
     sbc_series = [(fy, m.years[fy]["fcf_sbc"]) for fy in sorted(m.years)
                   if "fcf_sbc" in m.years[fy] and not m.years[fy]["fcf_sbc"].is_na()]
     if not sbc_series:
-        return None
+        # v33: Fallback auf Roh-FCF (ohne SBC), sbc_missing=True
+        fcf_series = [(fy, m.years[fy]["fcf"]) for fy in sorted(m.years)
+                      if "fcf" in m.years[fy] and not m.years[fy]["fcf"].is_na()]
+        if not fcf_series:
+            return None
+        last = fcf_series[-n:]
+        return {
+            "fcf": sum(x.value for _, x in last) / len(last),
+            "years_used": len(last),
+            "sources": [(f"FY{fy}", x.value, x.currency) for fy, x in last],
+            "currency": last[-1][1].currency,
+            "sbc_missing": True,
+        }
     last = sbc_series[-n:]
     return {
         "fcf": sum(x.value for _, x in last) / len(last),
@@ -181,7 +243,8 @@ def _avg_fcf_start(m: TickerMetrics, n: int) -> dict | None:
     }
 
 
-def _net_debt_ex_customer_deposits(m: TickerMetrics, fcf_basis: str):
+def _net_debt_ex_customer_deposits(m: TickerMetrics, fcf_basis: str,
+                                    net_debt_mode: str = "reported"):
     """Nettoverschuldung OHNE Kundengelder (Berichtswährung) + Quelle.
 
     Kundengelder (z. B. PYPL 'Deposit Liabilities') sind wirtschaftlich
@@ -189,9 +252,14 @@ def _net_debt_ex_customer_deposits(m: TickerMetrics, fcf_basis: str):
     (Total Debt - Cash) unterschlaegt die Verschuldung daher um die
     Kundengelder. Sie werden hier hinzuaddiert.
 
+    net_debt_mode (config `dcf.net_debt_mode`):
+      "reported"  — gemeldete Nettoverschuldung (+ Kundengelder)
+      "incl_sti"  — Finanzschulden − (Cash + kurzfristige Anlagen)
+                    (+ Kundengelder); kurzfristige Anlagen gelten als
+                    liquid und werden mit abgezogen.
+
     Prioritaet: TTM-Bestand (Stichtag letztes Quartal) falls fcf_basis="ttm",
-    sonst das neueste Geschaeftsjahr mit Bilanzdaten (gemeldetes net_debt,
-    sonst total_debt - cash).
+    sonst das neueste Geschaeftsjahr mit Bilanzdaten.
     Rueckgabe: (wert, quelle, kundengelder, waehrung).
     """
     nan = float("nan")
@@ -199,8 +267,25 @@ def _net_debt_ex_customer_deposits(m: TickerMetrics, fcf_basis: str):
     if fcf_basis == "ttm" and ttm is not None:
         nd_m = ttm.ttm.get("net_debt")
         cd_m = ttm.ttm.get("customer_deposits")
+        td_m = ttm.ttm.get("_total_debt")
+        cash_m = ttm.ttm.get("_cash")
+        sti_m = ttm.ttm.get("_short_term_investments")
+        cd = cd_m.value if (cd_m is not None and not cd_m.is_na()) else nan
+        cur = (nd_m.currency if nd_m is not None and not nd_m.is_na()
+               else (td_m.currency if td_m is not None and not td_m.is_na() else ""))
+        if net_debt_mode == "incl_sti" and td_m is not None and not td_m.is_na():
+            liquid = 0.0
+            if cash_m is not None and not cash_m.is_na():
+                liquid += cash_m.value
+            if sti_m is not None and not sti_m.is_na():
+                liquid += sti_m.value
+            if liquid > 0 or (cash_m is not None and not cash_m.is_na()):
+                adj = td_m.value - liquid + (cd if cd == cd else 0.0)
+                src = (f"TTM (Stichtag {ttm.quarter_end}) "
+                       f"Total Debt − (Cash + kurzfr. Anlagen)"
+                       + (" + Kundengelder" if cd == cd else ""))
+                return adj, src, cd, cur
         if nd_m is not None and not nd_m.is_na():
-            cd = cd_m.value if (cd_m is not None and not cd_m.is_na()) else nan
             adj = nd_m.value + cd if cd == cd else nd_m.value
             src = (f"TTM (Stichtag {ttm.quarter_end})"
                    + (" + Kundengelder" if cd == cd else ""))
@@ -211,7 +296,19 @@ def _net_debt_ex_customer_deposits(m: TickerMetrics, fcf_basis: str):
         cd = y.get("customer_deposits")
         td = y.get("_total_debt")
         cash = y.get("_cash")
+        sti = y.get("_short_term_investments")
         cd_v = cd.value if (cd is not None and not cd.is_na()) else nan
+        if net_debt_mode == "incl_sti" and td is not None and not td.is_na():
+            liquid = 0.0
+            if cash is not None and not cash.is_na():
+                liquid += cash.value
+            if sti is not None and not sti.is_na():
+                liquid += sti.value
+            if liquid > 0 or (cash is not None and not cash.is_na()):
+                adj = td.value - liquid + (cd_v if cd_v == cd_v else 0.0)
+                src = (f"FY{fy} Total Debt − (Cash + kurzfr. Anlagen)"
+                       + (" + Kundengelder" if cd_v == cd_v else ""))
+                return adj, src, cd_v, td.currency
         if nd is not None and not nd.is_na():
             adj = nd.value + cd_v if cd_v == cd_v else nd.value
             src = f"FY{fy} net_debt" + (" + Kundengelder" if cd_v == cd_v else "")
@@ -233,8 +330,10 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
 
     fcf_mode: Startwert des FCF -- "auto" (Config `dcf.fcf_mode`, Default:
     TTM-Basis falls plausibel, sonst Ø letzte 3 GJ), "avg3" (Ø letzte 3 GJ),
-    "latest" (juengstes GJ), "ttm" (TTM-Basis, Rueckfall auf Ø3J wenn TTM
-    nicht verwendbar).
+    "latest" (juengstes GJ), "ttm" (TTM Ø: Ø aus TTM + 2 nicht
+    ueberlappenden GJ, Rueckfall auf Ø3J wenn TTM nicht verwendbar),
+    "ttm_only" (v27: reiner TTM-Start-FCF nach SBC, ohne Ø; Rueckfall auf
+    Ø3J wenn TTM nicht verwendbar).
 
     Innerer Wert (Equity) = Unternehmenswert (Barwert FCFs + Barwert
     Terminal Value) - Nettoverschuldung OHNE Kundengelder. Wert je Aktie =
@@ -244,7 +343,7 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     dcfg = cfg["dcf"]
     nan = float("nan")
     mode = (fcf_mode or dcfg.get("fcf_mode", "auto")).lower()
-    if mode not in ("auto", "avg3", "latest", "ttm"):
+    if mode not in ("auto", "avg3", "latest", "ttm", "ttm_only"):
         mode = "auto"
     result = DcfResult(
         fcf_normalized=nan, fcf_years_used=0, revenue_cagr=nan,
@@ -257,16 +356,20 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     start = None
     if mode in ("auto", "ttm"):
         start = _ttm_fcf_start(m)
+    if start is None and mode == "ttm_only":
+        start = _ttm_only_fcf_start(m)  # v27: reiner TTM-Start (ohne Ø)
     if start is None and mode == "latest":
         start = _avg_fcf_start(m, 1)
     if start is None and mode != "latest":
         start = _avg_fcf_start(m, int(dcfg.get("fcf_avg_years", 3)))
     if start is None:
-        return result  # kein FCF nach SBC bestimmbar
+        return result  # kein FCF bestimmbar (weder SBC noch Roh-FCF)
+    result.sbc_missing = bool(start.get("sbc_missing", False))
+    result.fcf_le0 = (start["fcf"] <= 0) if start["fcf"] == start["fcf"] else False
     result.fcf_normalized = start["fcf"]
     result.fcf_years_used = start["years_used"]
     result.fcf_sources = start["sources"]
-    if mode in ("auto", "ttm") and "quarter_end" in start:
+    if mode in ("auto", "ttm", "ttm_only") and "quarter_end" in start:
         result.fcf_basis = "ttm"
         result.ttm_quarter_end = start["quarter_end"]
     else:
@@ -290,9 +393,16 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     base_cap = float(dcfg.get("base_growth_cap", 0.06))
     bull_mult = float(dcfg.get("bull_growth_multiplier", 1.3))
     bull_cap = float(dcfg.get("bull_growth_cap", 0.10))
+    neg_spread = float(dcfg.get("bear_negative_spread", 0.03))  # v37 (1)
     g_terminal = result.terminal_growth
     if cagr != cagr:  # NaN -> kein Wachstum bestimmbar
         g_bear, g_base, g_bull = 0.0, 0.0, 0.0
+    elif cagr < 0:
+        # v37 (1): schrumpfendes Unternehmen -- Base = CAGR (negativ),
+        # Bear = CAGR - bear_negative_spread, Bull = 0 % (keine Erholung)
+        g_bear = cagr - neg_spread
+        g_base = cagr
+        g_bull = 0.0
     else:
         g_bear = 0.0
         g_base = min(cagr, base_cap)
@@ -314,25 +424,60 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     result.fcf_normalized_conv = fcf_conv
 
     # Nettoverschuldung OHNE Kundengelder (Berichtsw. -> Marktkap.-Waehrung)
-    nd_rep, nd_src, cd_val, nd_cur = _net_debt_ex_customer_deposits(m, result.fcf_basis)
+    nd_mode = str(dcfg.get("net_debt_mode", "reported")).lower()
+    if nd_mode not in ("reported", "incl_sti"):
+        nd_mode = "reported"
+    result.net_debt_mode = nd_mode
+    alt_mode = "incl_sti" if nd_mode == "reported" else "reported"
+    nd_rep, nd_src, cd_val, nd_cur = _net_debt_ex_customer_deposits(
+        m, result.fcf_basis, net_debt_mode=nd_mode)
+    nd_alt, nd_alt_src, _cd_alt, nd_alt_cur = _net_debt_ex_customer_deposits(
+        m, result.fcf_basis, net_debt_mode=alt_mode)
     result.net_debt = nd_rep
     result.net_debt_source = nd_src
     result.customer_deposits = cd_val
+    result.net_debt_alt = nd_alt
+    result.net_debt_alt_source = nd_alt_src
     nd_conv = nan
     if nd_rep == nd_rep and nd_cur:
         nd_conv = converter.convert(nd_rep, nd_cur, mcap.currency, latest_fy)
+    nd_alt_conv = nan
+    if nd_alt == nd_alt and nd_alt_cur:
+        nd_alt_conv = converter.convert(nd_alt, nd_alt_cur, mcap.currency, latest_fy)
 
     for name, g5 in (("bear", g_bear), ("base", g_base), ("bull", g_bull)):
-        sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
-                           result.shares, dcfg, net_debt=nd_conv)
+        if result.fcf_le0:
+            # v40 (1): Start-FCF <= 0 -> Wert je Aktie in der BERECHNUNG n/a
+            # (nicht nur Anzeige); Szenario bleibt mit NaN gefuellt.
+            sc = DcfScenario(name=name, growth_rates=_growth_path(g5, g_terminal, dcfg),
+                             fcfs=[], pv_fcfs=nan, terminal_value=nan,
+                             enterprise_value=nan, value_per_share=nan)
+        else:
+            sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
+                               result.shares, dcfg, net_debt=nd_conv)
         result.scenarios[name] = sc
+        result.scenario_growth[name] = g5  # v37 (1): fuer Erklaertext
 
     # --- Margin of Safety (Base) ----------------------------------------------
     base = result.scenarios.get("base")
-    if base is not None and base.value_per_share == base.value_per_share and base.value_per_share > 0:
-        price = mcap.value / result.shares if result.shares == result.shares else nan
+    price = nan
+    if result.shares == result.shares and result.shares > 0:
+        price = mcap.value / result.shares
+    # v40 (1): Start-FCF <= 0 -> MoS in der Berechnung n/a (Base vps ist NaN)
+    if (base is not None and not result.fcf_le0
+            and base.value_per_share == base.value_per_share and base.value_per_share > 0):
         if price == price and price > 0:
             result.margin_of_safety = 1.0 - price / base.value_per_share
+
+    # --- MoS (Base) mit alternativer Nettoverschuldung (nebengerechnet) ------
+    # v40 (1): bei fcf_le0 bleibt mos_base_alt NaN
+    if nd_alt_conv == nd_alt_conv and base is not None and not result.fcf_le0:
+        ev = base.enterprise_value
+        equity_alt = ev - nd_alt_conv if ev == ev else nan
+        vps_alt = equity_alt / result.shares if (equity_alt == equity_alt
+                                                 and result.shares == result.shares) else nan
+        if vps_alt == vps_alt and vps_alt > 0 and price == price and price > 0:
+            result.mos_base_alt = 1.0 - price / vps_alt
     return result
 
 
@@ -391,7 +536,11 @@ def sensitivity_mos_base(m: TickerMetrics, cfg: dict, current_price: float | Non
     if math.isnan(fcf_conv):
         return {"mos": pd.DataFrame(), "vps": pd.DataFrame()}
     # Nettoverschuldung (ohne Kundengelder) wie in compute_dcf -> exakte Uebereinstimmung
-    nd_rep, _nd_src, _cd, nd_cur = _net_debt_ex_customer_deposits(m, base_res.fcf_basis)
+    nd_mode = str(dcfg.get("net_debt_mode", "reported")).lower()
+    if nd_mode not in ("reported", "incl_sti"):
+        nd_mode = "reported"
+    nd_rep, _nd_src, _cd, nd_cur = _net_debt_ex_customer_deposits(
+        m, base_res.fcf_basis, net_debt_mode=nd_mode)
     nd_conv = float("nan")
     if nd_rep == nd_rep and nd_cur:
         nd_conv = converter.convert(nd_rep, nd_cur, mcap.currency, latest_fy)
@@ -421,21 +570,27 @@ def sensitivity_mos_base(m: TickerMetrics, cfg: dict, current_price: float | Non
     return {"mos": pd.DataFrame(mos_rows), "vps": pd.DataFrame(vps_rows)}
 
 
-def is_buy_candidate(quality: float, dcf: DcfResult, current_price: float, cfg: dict) -> bool:
+def is_buy_candidate(quality: float, dcf: DcfResult, current_price: float, cfg: dict,
+                     mos_rule: float | None = None) -> bool:
     """Kaufkandidat: Quality >= buy_quality_min UND MoS (Base) >=
     buy_margin_of_safety_min UND Bear-Szenario >= Kurs x buy_bear_floor.
 
     Alle Schwellen aus config.yaml (Block `dcf`). Quality statt Gesamtscore
     (v21): die Bewertungsbedingungen (MoS, Bear) tragen den Value-Anteil.
+
+    mos_rule (v26): das fuer die MoS-Bedingung verwendete MoS — Default
+    dcf.margin_of_safety (aktiver fcf_mode). Die Pipeline uebergibt hier
+    das nach `dcf.mos_min_mode` aggregierte MoS (min/avg3/latest/ttm/auto).
     """
     dcfg = cfg["dcf"]
-    if quality != quality or dcf.margin_of_safety != dcf.margin_of_safety:
+    mos = dcf.margin_of_safety if mos_rule is None else mos_rule
+    if quality != quality or mos != mos:
         return False
     if current_price != current_price or current_price <= 0:
         return False
     if quality < float(dcfg.get("buy_quality_min", 60)):
         return False
-    if dcf.margin_of_safety < float(dcfg.get("buy_margin_of_safety_min", 0.30)):
+    if mos < float(dcfg.get("buy_margin_of_safety_min", 0.30)):
         return False
     bear = dcf.scenarios.get("bear")
     if bear is None or bear.value_per_share != bear.value_per_share:

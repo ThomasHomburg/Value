@@ -17,4 +17,12 @@ def aapl_metrics():
 
 @pytest.fixture
 def cfg():
-    return load_config()
+    cfg = load_config()
+    # SEC-EDGAR-Abgleich in Tests deaktiviert: keine echten HTTP-Calls
+    # gegen data.sec.gov (langsam, Rate-Limit, im CI nicht deterministisch).
+    # Tests in test_v26.py testen data.sec mit dem Fixture `cfg_sec`
+    # (enabled=True) und gemonkeypatchten _cik_for_ticker/_fetch_companyfacts.
+    sec = dict(cfg.get("sec", {}))
+    sec["enabled"] = False
+    cfg["sec"] = sec
+    return cfg
