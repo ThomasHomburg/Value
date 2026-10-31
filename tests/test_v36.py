@@ -69,6 +69,9 @@ def _cfg(cfg, sec_enabled=False):
     sec = dict(cfg2.get("sec", {}))
     sec["enabled"] = sec_enabled
     cfg2["sec"] = sec
+    # v40: captive_finance.tickers leeren, damit Capex-Tests nicht zusaetzlich
+    # 'Pruefen (Captive Finance)' bekommen (CAT/DE stehen in der Config-Liste)
+    cfg2["captive_finance"] = {"tickers": []}
     return cfg2
 
 

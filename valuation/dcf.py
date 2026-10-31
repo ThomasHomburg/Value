@@ -446,8 +446,15 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
         nd_alt_conv = converter.convert(nd_alt, nd_alt_cur, mcap.currency, latest_fy)
 
     for name, g5 in (("bear", g_bear), ("base", g_base), ("bull", g_bull)):
-        sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
-                           result.shares, dcfg, net_debt=nd_conv)
+        if result.fcf_le0:
+            # v40 (1): Start-FCF <= 0 -> Wert je Aktie in der BERECHNUNG n/a
+            # (nicht nur Anzeige); Szenario bleibt mit NaN gefuellt.
+            sc = DcfScenario(name=name, growth_rates=_growth_path(g5, g_terminal, dcfg),
+                             fcfs=[], pv_fcfs=nan, terminal_value=nan,
+                             enterprise_value=nan, value_per_share=nan)
+        else:
+            sc = _dcf_scenario(name, g5, g_terminal, result.discount_rate, fcf_conv,
+                               result.shares, dcfg, net_debt=nd_conv)
         result.scenarios[name] = sc
         result.scenario_growth[name] = g5  # v37 (1): fuer Erklaertext
 
@@ -456,12 +463,15 @@ def compute_dcf(m: TickerMetrics, cfg: dict, fx=None, fcf_mode: str | None = Non
     price = nan
     if result.shares == result.shares and result.shares > 0:
         price = mcap.value / result.shares
-    if base is not None and base.value_per_share == base.value_per_share and base.value_per_share > 0:
+    # v40 (1): Start-FCF <= 0 -> MoS in der Berechnung n/a (Base vps ist NaN)
+    if (base is not None and not result.fcf_le0
+            and base.value_per_share == base.value_per_share and base.value_per_share > 0):
         if price == price and price > 0:
             result.margin_of_safety = 1.0 - price / base.value_per_share
 
-    # --- MoS (Base) mit alternativer Nettoverschuldung (nebencerechnet) ------
-    if nd_alt_conv == nd_alt_conv and base is not None:
+    # --- MoS (Base) mit alternativer Nettoverschuldung (nebengerechnet) ------
+    # v40 (1): bei fcf_le0 bleibt mos_base_alt NaN
+    if nd_alt_conv == nd_alt_conv and base is not None and not result.fcf_le0:
         ev = base.enterprise_value
         equity_alt = ev - nd_alt_conv if ev == ev else nan
         vps_alt = equity_alt / result.shares if (equity_alt == equity_alt

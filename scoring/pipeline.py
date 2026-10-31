@@ -116,6 +116,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     mos_latest = mos_by_mode.get("latest", float("nan"))
     mos_ttm = mos_by_mode.get("ttm", float("nan"))
     mos_ttm_only = mos_by_mode.get("ttm_only", float("nan"))
+    # v40 (1): Modus-Namen fuer die fcf_le0-Begruendung (frueh, auch vor missing[] nutzbar)
+    mode_names = {"avg3": "Ø3J", "latest": "jüngstes GJ",
+                  "ttm": "TTM Ø", "ttm_only": "TTM"}
 
     # v36 (4): MoS bei erhoehtem Diskontsatz (Base, aktiver Startwert-Modus) --
     # Robustheit: gleiches Szenario mit dcf.robust_discount_rate (Default 10 %)
@@ -172,7 +175,15 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                          "auto": "MoS Base"}.get(mos_mode, f"MoS {mos_mode}")
             missing.append(f"{mos_label} {mos_rule:.1%} < {mos_min:.0%}")
         else:
-            missing.append("MoS Base n/a")
+            # v40 (1): Start-FCF <= 0 im aktiven/entscheidenden Modus begruenden
+            le0_modes = [mode_names.get(k, k) for k, v in mos_by_mode.items()
+                         if compute_dcf(m, cfg, fcf_mode=k).fcf_le0] if not special else []
+            if dcf.fcf_le0:
+                missing.append(f"Start-FCF ≤ 0 im Modus {mode_names.get(dcf.fcf_mode, dcf.fcf_mode)}")
+            elif le0_modes:
+                missing.append(f"Start-FCF ≤ 0 im Modus {', '.join(le0_modes)}")
+            else:
+                missing.append("MoS Base n/a")
     if (bear_vps is None or bear_vps.value_per_share != bear_vps.value_per_share
             or bear_vps.value_per_share < bear_floor * (price if price == price else float("nan"))):
         if price == price and bear_vps is not None and bear_vps.value_per_share == bear_vps.value_per_share:
@@ -185,13 +196,11 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     #   (bei Kandidat: der fuer das Minimum entscheidende Modus wird genannt).
     # Beobachtung: Minimum < 30 %, aber der BESTE Modus >= 30 % und Quality >= 60.
     #   (Bear spielt fuer die Beobachtungsliste keine Rolle.)
-    mode_names = {"avg3": "Ø3J", "latest": "jüngstes GJ",
-                  "ttm": "TTM Ø", "ttm_only": "TTM"}
-
     def _status_for(mos_rule_val: float, modes_for_rule: list[tuple[str, float]],
                     is_buy_flag: bool) -> tuple[str, str]:
         """Status (Kandidat/Beobachtung/nein) fuer eine Kandidatenregel (v30:
-        dieselbe Logik fuer 'alle Modi' und 'juengste 2 Modi')."""
+        dieselbe Logik fuer 'alle Modi' und 'juengste 2 Modi').
+        v40 (1): bei 'nein' werden die `missing`-Gruende angehaengt."""
         if is_buy_flag:
             st = "Kandidat"
             detail = ""
@@ -209,7 +218,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
                 return "Beobachtung", (f"bester Modus {mode_names.get(best_mode, best_mode)} "
                                         f"{best_val:.1%} ≥ {watch_min:.0%}, "
                                         f"aber min {mos_rule_val:.1%} < {mos_min:.0%}")
-        return "nein", ""
+        # v40 (1): Begruendung aus `missing` anhaengen (z. B. Start-FCF <= 0 im Modus X)
+        return "nein", "; ".join(missing)
 
     # v34/v35: SBC-Zeile fehlt in ALLEN Jahren -> Status "Pruefen (SBC fehlt)" (nie Kandidat);
     # FCF/DCF laufen ohne SBC (Fallback v33), Roh-FCF-Yield fliesst NICHT in den Value-Score.
@@ -237,6 +247,13 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     # hier nur vormerken, Auswertung nach sec_check (deviations verfuegbar)
     pruefen_capex = False
     capex_dev_years: list[dict] = []
+    # v40 (2): Captive Finance (config captive_finance.tickers) -- ND inkl.
+    # Finanzierungsarm -> Pruefstatus, nie Kandidat (Flag erst nach flag_parts)
+    captive = m.ticker.upper() in {str(t).upper() for t in cfg.get("captive_finance", {}).get("tickers", [])}
+    if captive:
+        dcf.is_buy = False
+        logger.warning("%s: Captive Finance (config captive_finance.tickers) -> Status 'Pruefen (Captive Finance)'; "
+                       "nie Kandidat; ND inkl. Finanzierungsarm, DCF nicht belastbar", m.ticker)
 
     mos_vals = [(k, v) for k, v in mos_by_mode.items() if v == v]
     mos_vals_global = mos_vals
@@ -286,6 +303,9 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         logger.warning("%s: Eigenkapital negativ (FY%d: %.2f Mrd.) -> Flag 'ek_negativ'; "
                        "ROE n/a in EK<=0-Jahren, ROIC mit Schulden+EK als Nenner",
                        m.ticker, latest_fy, latest_eq.value / 1e9)
+    # v40 (2): Captive Finance -> Flag (captive wird frueher berechnet)
+    if captive:
+        flag_parts.append("captive_finance")
     # ROIC > 100 % entsteht typischerweise durch eine kleine/negative Kapitalbasis
     # (z. B. Net Cash wie bei AAPL) -- Anzeige begrenzen und flaggen.
     roic5 = criteria["roic_avg5"].value
@@ -352,13 +372,24 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         status = status_all = status_recent2 = "Sonderregel nötig"
         status_detail = status_all_detail = status_recent2_detail = (
             f"{m.industry}: DCF/FCF-Yield nicht berechnet (Sonderregel)")
-    # v36 (2): Capex-Definition laut SEC in >= min_years Jahren > tolerance -> Pruefstatus
-    elif pruefen_capex:
-        status = status_all = status_recent2 = "Prüfen (Capex-Definition)"
-        status_detail = status_all_detail = status_recent2_detail = (
-            f"Capex-Diff laut SEC in {len(capex_dev_years)} Jahren > "
-            f"{float(cfg.get('sec', {}).get('capex_check', {}).get('ocf_share', 0.10)):.0%} des OCF "
-            f"-> manuell pruefen; nie Kandidat")
+    # v36 (2): Capex-Definition laut SEC in >= min_years Jahren > ocf_share des OCF -> Pruefstatus
+    # v40 (2): Captive Finance -> eigener Pruefstatus; bei beiden Gruenden beide nennen
+    elif pruefen_capex or captive:
+        reasons = []
+        if pruefen_capex:
+            reasons.append("Prüfen (Capex-Definition)")
+        if captive:
+            reasons.append("Prüfen (Captive Finance)")
+        status = status_all = status_recent2 = "; ".join(reasons)
+        det_parts = []
+        if pruefen_capex:
+            det_parts.append(
+                f"Capex-Diff laut SEC in {len(capex_dev_years)} Jahren > "
+                f"{float(cfg.get('sec', {}).get('capex_check', {}).get('ocf_share', 0.10)):.0%} des OCF")
+        if captive:
+            det_parts.append("Nettoverschuldung inkl. Finanzierungsarm, DCF nicht belastbar")
+        det_parts.append("manuell pruefen; nie Kandidat")
+        status_detail = status_all_detail = status_recent2_detail = "; ".join(det_parts)
     # v35 (2): SBC fehlt UND ohne SBC waere der Ticker Kandidat -> "Pruefen (SBC fehlt)"
     elif pruefen_sbc:
         status = status_all = status_recent2 = "Prüfen (SBC fehlt)"

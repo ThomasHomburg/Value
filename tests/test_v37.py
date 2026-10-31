@@ -24,6 +24,14 @@ from valuation.dcf import compute_dcf
 # v37: wiederverwendete Mocks aus test_v36 (gleiche synthetische Bilanzdaten)
 from tests.test_v36 import _cfg, _facts_capex, _mk
 
+
+def _cfg_v40(cfg, sec_enabled=False):
+    """v40: wie _cfg, aber captive_finance.tickers geleert (sonst waere CAT/DE
+    zusaetzlich 'Pruefen (Captive Finance)')."""
+    cfg2 = _cfg(cfg, sec_enabled=sec_enabled)
+    cfg2["captive_finance"] = {"tickers": []}
+    return cfg2
+
 DCF_CFG = {"dcf": {
     "discount_rate": 0.10, "terminal_growth": 0.025,
     "base_growth_cap": 0.06, "bull_growth_multiplier": 1.3,
@@ -202,7 +210,7 @@ def test_row_traegt_quality_coverage(cfg):
 
 def _run_capex(cfg, monkeypatch, ticker, cik, dev_years):
     import data.sec as secmod
-    cfg2 = _cfg(cfg, sec_enabled=True)
+    cfg2 = _cfg_v40(cfg, sec_enabled=True)  # v40: ohne captive_finance
     m = _mk(ticker=ticker, mcap=2e11)
     monkeypatch.setattr(secmod, "_cik_for_ticker", lambda t: cik)
     monkeypatch.setattr(secmod, "_fetch_companyfacts",

@@ -363,6 +363,13 @@ sec:
     ocf_share: 0.10           # Differenz > 10 % des OCF je Jahr
     min_years: 2              # in mind. 2 betroffenen Jahren -> Pruefstatus
 
+# v40 (2): Captive-Finance-Ticker -- Nettoverschuldung enthaelt den
+# Finanzierungsarm (Industrial/Equipment Operations nicht trennbar in den
+# verfuegbaren Daten, siehe CLAUDE.md v39 Machbarkeitsbericht) -> Flag
+# "captive_finance", Status "Pruefen (Captive Finance)", nie Kandidat.
+captive_finance:
+  tickers: [DE, CAT, PCAR, GM, F]
+
 consistency:
   # v36 (5): Bilanz-Konsistenz -- Flag "ND != Schulden - Cash", wenn die gemeldete
   # Nettoverschuldung um mehr als `net_debt_mcap_share` der Marktkapitalisierung
