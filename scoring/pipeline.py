@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import math
+from datetime import date
 
 from data.loader import Metric, TickerMetrics
 from data.metrics import fcf_yield, fcf_yield_sbc, roic
@@ -106,12 +107,16 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     # v27: MoS (Base) je Startwert-Modus (Ø3J / jüngstes GJ / TTM Ø / TTM rein)
     # v35: bei Sektor-Sonderregel kein DCF -> alle MoS NaN ("n/a (Sonderregel)")
     mos_by_mode = {}
+    vps_by_mode = {}  # v41 (0): Wert je Aktie (Base) je Startwert-Modus (iv_* im Export)
     for mode in ("avg3", "latest", "ttm", "ttm_only"):
         if special:
             mos_by_mode[mode] = float("nan")
+            vps_by_mode[mode] = float("nan")
         else:
             dcf_m = compute_dcf(m, cfg, fcf_mode=mode)
             mos_by_mode[mode] = dcf_m.margin_of_safety
+            _b = dcf_m.scenarios.get("base")
+            vps_by_mode[mode] = _b.value_per_share if _b is not None else float("nan")
     mos_avg3 = mos_by_mode.get("avg3", float("nan"))
     mos_latest = mos_by_mode.get("latest", float("nan"))
     mos_ttm = mos_by_mode.get("ttm", float("nan"))
@@ -124,6 +129,7 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
     # Robustheit: gleiches Szenario mit dcf.robust_discount_rate (Default 10 %)
     robust_rate = float(dc.get("robust_discount_rate", 0.10))
     mos_robust = float("nan")
+    vps_robust = float("nan")  # v41 (0): iv_base_10pct (Base-Szenario bei robust_discount_rate)
     if not special:
         try:
             cfg_r = dict(cfg)
@@ -132,6 +138,8 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
             dcf_r = compute_dcf(m, cfg_r, fcf_mode=dcf.fcf_mode
                                 if dcf.fcf_mode in ("avg3", "latest", "ttm", "ttm_only") else None)
             mos_robust = dcf_r.margin_of_safety
+            _rb = dcf_r.scenarios.get("base")
+            vps_robust = _rb.value_per_share if _rb is not None else float("nan")
         except Exception as exc:
             logger.warning("%s: Robust-MoS fehlgeschlagen: %s", m.ticker, exc)
 
@@ -609,6 +617,20 @@ def evaluate_ticker(m: TickerMetrics, cfg: dict) -> dict:
         "capex_dev_years": capex_dev_years,
         "nd_inconsistent": nd_inconsistent,
         "zyk_unnorm": zyk_unnorm,
+        # v41 (0): Export-Felder fuer Tracker/Live-Update (nur Anzeige/Export,
+        # die Screener-Logik bleibt unveraendert)
+        "kurs": price,
+        "kurs_datum": m.market_cap_date or "",
+        "calc_date": date.today().isoformat(),
+        "iv_bear": dcf.scenarios.get("bear").value_per_share if dcf.scenarios.get("bear") else float("nan"),
+        "iv_base": dcf.scenarios.get("base").value_per_share if dcf.scenarios.get("base") else float("nan"),
+        "iv_bull": dcf.scenarios.get("bull").value_per_share if dcf.scenarios.get("bull") else float("nan"),
+        "iv_avg3": vps_by_mode.get("avg3", float("nan")),
+        "iv_latest": vps_by_mode.get("latest", float("nan")),
+        "iv_ttm": vps_by_mode.get("ttm", float("nan")),
+        "iv_ttm_only": vps_by_mode.get("ttm_only", float("nan")),
+        "iv_base_10pct": vps_robust,
+        "naechster_earnings": getattr(m, "next_earnings_date", "") or "",
     }
     out["row"] = row
     out["sec_check"] = sec

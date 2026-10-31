@@ -143,6 +143,13 @@ class YfinanceProvider:
                                        int(financials.columns[0].year))
             from datetime import date
             result.market_cap_date = date.today().isoformat()  # Stichtag: Abrufdatum
+        # v41 (0): naechster Earnings-Termin, falls im info-Feld vorhanden
+        ned = info.get("nextEarningsDate") or info.get("earningsDate")
+        if ned is not None:
+            try:
+                result.next_earnings_date = str(ned)[:10]
+            except Exception:
+                result.next_earnings_date = ""
 
         # Spalten sind Timestamps (Jahresende); auf int-Jahr mappen, juengste zuerst
         cols = sorted(financials.columns, reverse=True)[:years]

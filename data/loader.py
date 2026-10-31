@@ -40,6 +40,8 @@ class TickerMetrics:
     extras: dict[str, Metric] = field(default_factory=dict)
     market_cap: Metric | None = None
     market_cap_date: str = ""  # Stichtag der Marktkapitalisierung (ISO-Datum, Abrufdatum)
+    # v41 (0): naechster Earnings-Termin (ISO-Datum), falls der Provider ihn liefert
+    next_earnings_date: str = ""
     years: dict[str, dict[str, Metric]] = field(default_factory=dict)
     # TTM (Quartalsdaten): Flussgroessen = Summe letzte 4 Quartale,
     # Bestandsgoessen = Stichtag letztes Quartal (nur yfinance-Provider).

@@ -53,6 +53,11 @@ APP_ROW_COLUMNS = {
     "nd_inconsistent", "zyk_unnorm",
     # v37: Quality-Abdeckung nur ueber Quality-Bloecke
     "quality_coverage",
+    # v41 (0): Export-Felder fuer Tracker/Live-Update
+    "kurs", "kurs_datum", "calc_date",
+    "iv_bear", "iv_base", "iv_bull",
+    "iv_avg3", "iv_latest", "iv_ttm", "iv_ttm_only", "iv_base_10pct",
+    "naechster_earnings",
 }
 
 # Felder, die scoring/pipeline.py und app.py aus DcfResult lesen

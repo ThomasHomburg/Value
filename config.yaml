@@ -376,6 +376,24 @@ consistency:
   # von (Total Debt - Cash) abweicht (neuestes Jahr mit allen drei Werten).
   net_debt_mcap_share: 0.05   # 5 % der Marktkapitalisierung
 
+# v41 (3): Live-Watchlist (live_update.py --ranking <csv>).
+# Status, die in die Watchlist aufgenommen werden (Kandidat/Beobachtung/...),
+# plus zusaetzliche Ticker unabhaengig vom Status.
+watchlist:
+  statuses: ["Kandidat", "Beobachtung", "Beobachtung (nicht normalisiert)"]
+  extra_tickers: [IT, FDS]    # zusaetzlich immer beobachten (Default IT, FDS)
+  # v41 (3) Flags: wert_veraltet nach naechster_earnings bzw. calc_date-A'lter (Tage);
+  # alarm bei Kursrueckfall seit calc_date bzw. Tagesbewegung
+  wert_veraltet_tage: 100
+  alarm_kurs_fall_pct: 0.10  # Kurs <= -10 % seit calc_date
+  alarm_tagesbewegung_pct: 0.08  # Tagesbewegung >= +/-8 %
+  # v41 (2): Default-Szenariogewichte fuer das Entscheidungslog (decisions.py)
+  szenario_gewichte: {bear: 0.25, base: 0.50, bull: 0.25}
+  # v41 (2): Kalibrierungsschwelle -- bei n < min_eintraege "unkalibriert" statt Brier-Kennzahl
+  review_min_eintraege: 30
+  # v41 (2): Ereignis E = Rendite nach 12 Monaten >= +10 %
+  ereignis_rendite_pct: 0.10
+
 universe:
   # v28 (Schritt 8): Universumslader.
   # sp500: Liste von der Wikipedia-Tabelle (pandas.read_html), wird als
