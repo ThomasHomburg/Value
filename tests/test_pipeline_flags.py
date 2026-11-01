@@ -46,7 +46,8 @@ def test_coverage_is_fraction(aapl_metrics):
     res = evaluate_ticker(aapl_metrics, cfg)
     cov = res["score"]["coverage"]
     assert 0.0 <= cov <= 1.0
-    assert cov == 1.0  # AAPL hat fuer alle 10 Kriterien Daten
+    # v28: Standardgruppe (AAPL) -- alle aktiven Kriterien haben Daten -> 100 %
+    assert cov == 1.0
 
 
 def test_na_criteria_excluded_and_renormalized(aapl_metrics):
@@ -60,7 +61,8 @@ def test_na_criteria_excluded_and_renormalized(aapl_metrics):
     crits = compute_criteria(aapl_metrics, cfg)
     res = score_ticker(crits, cfg["criteria"], cfg.get("score_groups"))
     assert crits["net_debt_ebitda"].is_na
-    # Deckung sinkt unter 100 % (Gewicht 0.10 fehlt)
+    # Deckung sinkt unter 100 % (Gewicht 0.10 fehlt; v28: Sektor-Kriterien
+    # sind fuer AAPL (Standardgruppe) nicht aktiv, Basis-Gewicht 1.0)
     assert res["coverage"] < 1.0
     assert res["coverage"] == round(0.90, 1)
     # Quality-Score trotzdem definiert (renormalisiert auf verbleibende Bloecke)
@@ -68,13 +70,27 @@ def test_na_criteria_excluded_and_renormalized(aapl_metrics):
 
 
 def test_sbc_yield_is_na_when_sbc_missing(aapl_metrics):
-    """Ohne SBC in den Rohdaten -> fcf_yield_sbc_avg3 n/a (nie Roh-FCF-Yield)."""
+    """v34/v35: Ohne SBC in ALLEN Jahren -> fcf_yield_sbc_avg3 n/a (Roh-FCF-Yield fliesst
+    NICHT in den Value-Score), nie Kandidat. v35: Status 'Pruefen (SBC fehlt)' NUR,
+    wenn ohne SBC Quality >= 60 UND MoS >= 30 % -- AAPL (MoS < 30 %) -> normaler Status."""
     from scoring.criteria import compute_criteria
+    from scoring.pipeline import evaluate_ticker
     cfg = load_config()
+    cfg["sec"] = {"enabled": False}
     for fy in aapl_metrics.years:
         aapl_metrics.years[fy]["fcf_sbc"].value = float("nan")
     crits = compute_criteria(aapl_metrics, cfg)
+    # Roh-FCF-Yield fliesst nicht in den Value-Score ein:
     assert crits["fcf_yield_sbc_avg3"].is_na
+    out = evaluate_ticker(aapl_metrics, cfg)
+    row = out["row"]
+    assert row is not None
+    assert "SBC n/a (ohne SBC)" in row["flags"]
+    assert row["is_buy"] is False  # nie Kandidat
+    # v35: Pruefstatus nur bei Quality >= 60 UND MoS >= 30 % ohne SBC
+    assert row["status_pruefen_sbc"] is (row["status"] == "Prüfen (SBC fehlt)")
+    if row["status_pruefen_sbc"]:
+        assert row["status"] == row["status_all"] == row["status_recent2"] == "Prüfen (SBC fehlt)"
 
 
 def test_row_has_both_yield_columns(aapl_metrics):
@@ -157,7 +173,8 @@ def test_kandidat_uses_quality_rule_not_score(aapl_metrics, cfg, monkeypatch):
     res = evaluate_ticker(aapl_metrics, cfg)
     row = res["row"]
     assert row["quality"] == 55.0
-    assert row["score"] >= 70          # Gesamtscore hoch, Quality niedrig
+    # Gesamtscore hoch (0,75*55 + 0,25*Value = 68,2 bei Value 84,6), Quality niedrig
+    assert row["score"] >= 65
     assert not row["is_buy"]
     assert "Quality 55.0 < 60" in row["kandidat"]
     assert "Score" not in row["kandidat"]
@@ -190,8 +207,13 @@ def test_mos_base_interpolation_points(aapl_metrics, cfg):
 
 
 def test_value_weights_sum_to_one(cfg):
-    """Value-Block: FCF-Yield 30 % + MoS Base 40 % + EV/EBIT 30 % = 100 %."""
-    w = {n: c["weight"] for n, c in cfg["criteria"].items() if c["block"] == "valuation"}
+    """Value-Block (Standard): FCF-Yield 30 % + MoS Base 40 % + EV/EBIT 30 % = 100 %.
+
+    v28: Zusaetzlich ffo_yield (REITs) im Valuation-Block -- die Summe der
+    Standard-Kriterien bleibt 1.0; Sektor-Kriterien werden je Gruppe
+    aktiviert (siehe test_v28.py)."""
+    w = {n: c["weight"] for n, c in cfg["criteria"].items()
+         if c["block"] == "valuation" and n != "ffo_yield"}
     assert w == {"fcf_yield_sbc_avg3": 0.30, "mos_base": 0.40, "ev_ebit_vs_median": 0.30}
     assert abs(sum(w.values()) - 1.0) < 1e-9
 
