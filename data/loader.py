@@ -32,13 +32,21 @@ class TickerMetrics:
     ticker: str
     name: str = ""
     sector: str = ""
+    industry: str = ""   # v28: Branchen-Feld (GICS Industry) -- Sektorregeln (Banken/Versicherer/Zykliker/REIT)
     country: str = ""
     source: str = ""  # Datenquelle: fmp | yfinance | demo
+    # v28: Zusatzkennzahlen fuer Sektorregeln (Banken/Versicherer: P/B,
+    # Dividendenrendite; REITs: FFO-Hinweis). Je Kennzahl eine Metric.
+    extras: dict[str, Metric] = field(default_factory=dict)
     market_cap: Metric | None = None
     market_cap_date: str = ""  # Stichtag der Marktkapitalisierung (ISO-Datum, Abrufdatum)
+    # v41 (0): naechster Earnings-Termin (ISO-Datum), falls der Provider ihn liefert
+    next_earnings_date: str = ""
     years: dict[str, dict[str, Metric]] = field(default_factory=dict)
     # TTM (Quartalsdaten): Flussgroessen = Summe letzte 4 Quartale,
     # Bestandsgoessen = Stichtag letztes Quartal (nur yfinance-Provider).
+    # v29: EBITDA unplausibel (EBITDA < EBIT in mind. einem Jahr) -> Flag + ND/EBITDA n/a
+    ebitda_unplausible: bool = False
     ttm: object | None = None            # data.ttm.TtmResult
     ttm_plausible: bool = True           # False -> Flag "Quartalsdaten unplausibel"
     ttm_fallback: bool = False           # True -> Rueckfall auf Geschaeftsjahre
@@ -133,8 +141,18 @@ def extract_metrics(
     if profile:
         result.name = profile.get("companyName", "")
         result.sector = profile.get("sector", "") or "Unbekannt"
+        # v28: Industry separat (FMP: 'industry'; yfinance: uebergeben als industry)
+        result.industry = profile.get("industry", "") or ""
         result.country = profile.get("country", "") or ""
         mcap = profile.get("mktCap", profile.get("marketCap"))
+        # v28: Zusatzkennzahlen (P/B, Dividendenrendite, FFO, ...) aus dem Profil
+        for key in ("price_to_book", "dividend_yield", "ffo_per_share", "ffo"):
+            raw = profile.get(key)
+            if raw is not None:
+                try:
+                    result.extras[key] = Metric(key, float(raw), "ratio", "", 0)
+                except (TypeError, ValueError):
+                    pass
         if mcap is not None:
             # FMP liefert mktCap in absoluten USD (wie die Statements);
             # KEINE Umrechnung auf Mio. -- sonst Misch-Einheiten (Faktor 1e6)
@@ -178,16 +196,33 @@ def extract_metrics(
             "net_debt": (bal.get("netDebt"), "currency"),
             "_total_debt": (bal.get("totalDebt"), "currency"),
             "_cash": (bal.get("cashAndCashEquivalents"), "currency"),
-            "_short_term_investments": (bal.get("shortTermInvestments"), "currency"),
+            "_short_term_investments": (bal.get("shortTermInvestments")
+                                        or bal.get("otherShortTermInvestments"), "currency"),
             "customer_deposits": (bal.get("depositLiabilities")
                                   or bal.get("customerDeposits"), "currency"),
             "operating_cashflow": (cf.get("operatingCashFlow"), "currency"),
             "capex": (cf.get("capitalExpenditure"), "currency"),
             "stock_based_compensation": (cf.get("stockBasedCompensation"), "currency"),
+            "depreciation_amortization": (cf.get("depreciationAndAmortization")
+                                          or cf.get("depreciationAndAmortizationCashFlow"), "currency"),
         }
         year_metrics: dict[str, Metric] = {
             name: _metric(name, raw, unit, currency, fy) for name, (raw, unit) in defs.items()
         }
+
+        # v29: EBITDA = EBIT + Abschreibungen (D&A) aus dem Cashflow-Statement,
+        # NICHT das gemeldete Yahoo/FMP-EBITDA-Feld (das weicht teils ab).
+        # Fallback nur wenn kein D&A gemeldet: gemeldetes EBITDA.
+        ebit_v = year_metrics["ebit"].value
+        da_v = year_metrics["depreciation_amortization"].value
+        rep_ebitda = year_metrics["ebitda"].value
+        if not math.isnan(ebit_v) and not math.isnan(da_v):
+            year_metrics["ebitda"] = Metric("ebitda", ebit_v + da_v, currency, currency, fy)
+        elif math.isnan(year_metrics["ebitda"].value):
+            pass  # gemeldetes EBITDA (ggf. NaN) bleibt
+        if (not math.isnan(year_metrics["ebitda"].value) and not math.isnan(ebit_v)
+                and year_metrics["ebitda"].value < ebit_v):
+            result.ebitda_unplausible = True
 
         # FCF = OCF - |Capex|; FMP liefert Capex mit negativem Vorzeichen.
         # Fehlende Komponente -> NaN
